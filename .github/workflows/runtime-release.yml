@@ -11,6 +11,10 @@ on:
         description: TeX Live release year
         required: true
         default: "2026"
+      source_run_id:
+        description: Optional completed runtime run whose artifacts should be republished without rebuilding
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -19,24 +23,12 @@ jobs:
   release-preflight:
     runs-on: ubuntu-latest
     env:
-      DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
-      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
-      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
-      NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-      NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-      NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
       RUNTIME_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
     steps:
-      - name: Verify release credentials are configured
+      - name: Verify manifest signing key is configured
         shell: bash
         run: |
           missing=()
-          [[ -n "$DEVELOPER_ID_P12_BASE64" ]] || missing+=(DEVELOPER_ID_P12_BASE64)
-          [[ -n "$DEVELOPER_ID_P12_PASSWORD" ]] || missing+=(DEVELOPER_ID_P12_PASSWORD)
-          [[ -n "$DEVELOPER_ID_APPLICATION" ]] || missing+=(DEVELOPER_ID_APPLICATION)
-          [[ -n "$NOTARY_APPLE_ID" ]] || missing+=(NOTARY_APPLE_ID)
-          [[ -n "$NOTARY_TEAM_ID" ]] || missing+=(NOTARY_TEAM_ID)
-          [[ -n "$NOTARY_PASSWORD" ]] || missing+=(NOTARY_PASSWORD)
           [[ -n "$RUNTIME_SIGNING_PRIVATE_KEY_BASE64" ]] || missing+=(RUNTIME_SIGNING_PRIVATE_KEY_BASE64)
           if (( ${#missing[@]} )); then
             printf 'Missing required GitHub Secret: %s\n' "${missing[@]}"
@@ -44,6 +36,7 @@ jobs:
           fi
 
   build-runtime:
+    if: inputs.source_run_id == ''
     needs: release-preflight
     strategy:
       fail-fast: false
@@ -61,42 +54,15 @@ jobs:
       - name: Verify runner architecture
         run: test "$(uname -m)" = "${{ matrix.platform.architecture }}"
 
-      - name: Import Developer ID certificate
-        env:
-          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/lightex-signing.keychain-db"
-          echo "$CERTIFICATE_BASE64" | base64 -D > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p actions "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p actions "$KEYCHAIN"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN"
-
       - name: Build portable runtime
         env:
-          CODE_SIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          CODE_SIGN_IDENTITY: "-"
         run: |
           ./scripts/build-runtime.sh \
             "${{ matrix.variant }}" \
             "${{ matrix.platform.architecture }}" \
             "${{ inputs.runtime_version }}" \
             "$RUNNER_TEMP/runtime-output"
-
-      - name: Notarize runtime archive
-        env:
-          APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-        run: |
-          ARCHIVE=$(find "$RUNNER_TEMP/runtime-output" -name '*.zip' -maxdepth 1)
-          xcrun notarytool submit "$ARCHIVE" \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_PASSWORD" \
-            --wait
 
       - uses: actions/upload-artifact@v4
         with:
@@ -105,7 +71,11 @@ jobs:
           compression-level: 0
 
   publish-runtime:
-    needs: build-runtime
+    if: >-
+      always() &&
+      needs.release-preflight.result == 'success' &&
+      (needs.build-runtime.result == 'success' || inputs.source_run_id != '')
+    needs: [release-preflight, build-runtime]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +84,11 @@ jobs:
           pattern: runtime-*
           path: runtime-assets
           merge-multiple: true
+          run-id: ${{ inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Split assets above the GitHub Releases limit
+        run: python3 scripts/split-runtime-release-assets.py runtime-assets
 
       - name: Generate signed manifest
         env:
@@ -136,9 +111,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view runtime-latest >/dev/null 2>&1 || \
-            gh release create runtime-latest --title "LighTeX Runtime" --notes "Managed TeX Live runtime assets."
+            gh release create runtime-latest \
+              --target "${{ github.sha }}" \
+              --title "LighTeX Runtime Preview" \
+              --prerelease \
+              --notes "Managed TeX Live runtime assets for the first preview. Executables use an ad-hoc signature; archive integrity is protected by the signed manifest and SHA-256 hashes."
           gh release upload runtime-latest \
-            runtime-assets/*.zip \
+            runtime-assets/*.zip* \
             runtime-assets/runtime-manifest.json \
             runtime-assets/runtime-manifest.sig \
             --clobber

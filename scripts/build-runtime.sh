@@ -62,7 +62,11 @@ done
 if [[ -n "${CODE_SIGN_IDENTITY:-}" ]]; then
     while IFS= read -r executable; do
         if file "${executable}" | grep -q 'Mach-O'; then
-            codesign --force --options runtime --timestamp --sign "${CODE_SIGN_IDENTITY}" "${executable}"
+            if [[ "${CODE_SIGN_IDENTITY}" == "-" ]]; then
+                codesign --force --sign - "${executable}"
+            else
+                codesign --force --options runtime --timestamp --sign "${CODE_SIGN_IDENTITY}" "${executable}"
+            fi
         fi
     done < <(find "${BIN_DIRECTORY}" -type f -perm -111)
 fi
@@ -70,12 +74,25 @@ fi
 ARCHIVE="${OUTPUT_DIRECTORY}/lightex-runtime-${VARIANT}-${ARCHITECTURE}-${RUNTIME_VERSION}.zip"
 ditto -c -k --sequesterRsrc --keepParent "${PAYLOAD_DIRECTORY}" "${ARCHIVE}"
 BIN_RELATIVE="runtime/texlive/bin/${BIN_DIRECTORY:t}"
+ARCHIVE_PART_ARGUMENTS=()
+if [[ "${VARIANT}" == "full" && $(stat -f %z "${ARCHIVE}") -ge 2000000000 ]]; then
+    split -b 1900000000 -d -a 2 "${ARCHIVE}" "${ARCHIVE}.part-"
+    for part in "${ARCHIVE}".part-*; do
+        ARCHIVE_PART_ARGUMENTS+=(--archive-part "${part}")
+    done
+fi
 python3 "${SCRIPT_DIRECTORY}/generate-runtime-metadata.py" \
     --variant "${VARIANT}" \
     --architecture "${ARCHITECTURE}" \
     --archive "${ARCHIVE}" \
     --payload "${PAYLOAD_DIRECTORY}" \
     --bin-relative "${BIN_RELATIVE}" \
+    "${ARCHIVE_PART_ARGUMENTS[@]}" \
     --output "${OUTPUT_DIRECTORY}/lightex-runtime-${VARIANT}-${ARCHITECTURE}.metadata.json"
 
-echo "Built ${ARCHIVE}"
+if (( ${#ARCHIVE_PART_ARGUMENTS[@]} > 0 )); then
+    rm "${ARCHIVE}"
+    echo "Built multipart runtime ${ARCHIVE}.part-*"
+else
+    echo "Built ${ARCHIVE}"
+fi

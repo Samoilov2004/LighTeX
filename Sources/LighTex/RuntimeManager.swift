@@ -12,7 +12,7 @@ enum RuntimeConfiguration {
             .flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/Samoilov2004/LighTeX/releases/download/runtime-latest/runtime-manifest.sig")!
     }
-    private static let developmentPublicKey = "taK2ZRu0mRv42P4x+kvgphBwAch/JzQnxYst1lRMW6k="
+    private static let developmentPublicKey = "ypmAAFFVK3x/OdzoPWUQPMOiq9XPc6tAfRlOHVVsJJ0="
 
     static var publicKeyData: Data {
         let environmentValue = ProcessInfo.processInfo.environment["LIGHTEX_RUNTIME_PUBLIC_KEY_BASE64"]
@@ -283,11 +283,20 @@ final class RuntimeManager: ObservableObject {
         let fileManager = FileManager.default
         do {
             let base = try Self.runtimeBaseDirectory()
-            try Self.checkDiskSpace(at: base, required: asset.installedSize + asset.compressedSize)
+            let archiveWorkspace = asset.archiveParts.count > 1
+                ? asset.compressedSize * 2
+                : asset.compressedSize
+            try Self.checkDiskSpace(at: base, required: asset.installedSize + archiveWorkspace)
             let downloads = base.appendingPathComponent("Downloads", isDirectory: true)
             try fileManager.createDirectory(at: downloads, withIntermediateDirectories: true)
             let archive = downloads.appendingPathComponent("\(UUID().uuidString).zip")
-            defer { try? fileManager.removeItem(at: archive) }
+            var downloadedParts: [URL] = []
+            defer {
+                try? fileManager.removeItem(at: archive)
+                for part in downloadedParts {
+                    try? fileManager.removeItem(at: part)
+                }
+            }
             let client = RuntimeDownloadClient()
             downloadClient = client
             installState = .downloading(RuntimeDownloadProgress(
@@ -295,20 +304,43 @@ final class RuntimeManager: ObservableObject {
                 totalBytes: asset.presentedCompressedSize,
                 bytesPerSecond: 0
             ))
-            let downloaded = try await client.download(
-                from: asset.downloadURL,
-                to: archive,
-                expectedBytes: asset.presentedCompressedSize
-            ) { [weak self] progress in
-                Task { @MainActor in
-                    self?.installState = .downloading(progress)
+            let parts = asset.archiveParts
+            var completedBytes: Int64 = 0
+            for (index, part) in parts.enumerated() {
+                let partOffset = completedBytes
+                let destination = parts.count == 1
+                    ? archive
+                    : downloads.appendingPathComponent("\(archive.lastPathComponent).part-\(index)")
+                let downloaded = try await client.download(
+                    from: part.downloadURL,
+                    to: destination,
+                    expectedBytes: part.compressedSize
+                ) { [weak self] progress in
+                    let aggregate = RuntimeDownloadProgress(
+                        receivedBytes: partOffset + progress.receivedBytes,
+                        totalBytes: asset.presentedCompressedSize,
+                        bytesPerSecond: progress.bytesPerSecond
+                    )
+                    Task { @MainActor in
+                        self?.installState = .downloading(aggregate)
+                    }
                 }
+                downloadedParts.append(downloaded)
+                completedBytes += part.compressedSize
+                guard !Task.isCancelled else { throw CancellationError() }
+            }
+            if downloadedParts.count > 1 {
+                let partsToConcatenate = downloadedParts
+                let archiveToCreate = archive
+                try await Task.detached(priority: .userInitiated) {
+                    try Self.concatenateArchiveParts(partsToConcatenate, to: archiveToCreate)
+                }.value
             }
             downloadClient = nil
             guard !Task.isCancelled else { throw CancellationError() }
             installState = .verifying
             let hash = try await Task.detached(priority: .userInitiated) {
-                try RuntimeSecurity.sha256(of: downloaded)
+                try RuntimeSecurity.sha256(of: archive)
             }.value
             guard hash.localizedCaseInsensitiveCompare(asset.sha256) == .orderedSame else {
                 throw RuntimeError.invalidArchiveHash
@@ -316,7 +348,7 @@ final class RuntimeManager: ObservableObject {
             installState = .installing
             let record = try await Task.detached(priority: .userInitiated) {
                 try RuntimeInstallationService.install(
-                    archiveURL: downloaded,
+                    archiveURL: archive,
                     manifest: manifest,
                     asset: asset,
                     baseDirectory: base
@@ -411,6 +443,9 @@ final class RuntimeManager: ObservableObject {
             guard ids.insert(asset.id).inserted,
                   asset.compressedSize > 0,
                   asset.installedSize > 0,
+                  !asset.archiveParts.isEmpty,
+                  asset.archiveParts.allSatisfy({ $0.compressedSize > 0 }),
+                  asset.archiveParts.reduce(Int64(0), { $0 + $1.compressedSize }) == asset.compressedSize,
                   (asset.displayCompressedSize == nil || asset.presentedCompressedSize > 0),
                   asset.sha256.range(of: #"^[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil else {
                 throw RuntimeError.invalidManifest
@@ -418,6 +453,23 @@ final class RuntimeManager: ObservableObject {
             let root = URL(fileURLWithPath: "/runtime", isDirectory: true)
             for tool in asset.tools.values {
                 _ = try ToolchainService.safeToolURL(relativePath: tool, root: root)
+            }
+        }
+    }
+
+    nonisolated static func concatenateArchiveParts(_ parts: [URL], to destination: URL) throws {
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(at: destination)
+        guard fileManager.createFile(atPath: destination.path, contents: nil) else {
+            throw URLError(.cannotCreateFile)
+        }
+        let output = try FileHandle(forWritingTo: destination)
+        defer { try? output.close() }
+        for part in parts {
+            let input = try FileHandle(forReadingFrom: part)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty {
+                try output.write(contentsOf: chunk)
             }
         }
     }

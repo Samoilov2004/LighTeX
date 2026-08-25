@@ -195,6 +195,55 @@ struct LighTexTests {
         #expect(throws: RuntimeError.self) {
             try RuntimeManager.validate(invalid)
         }
+
+        let multipart = RuntimeAsset(
+            variant: .full,
+            architecture: .current,
+            downloadParts: [
+                RuntimeArchivePart(
+                    downloadURL: URL(string: "https://example.com/runtime.zip.part-00")!,
+                    compressedSize: 60
+                ),
+                RuntimeArchivePart(
+                    downloadURL: URL(string: "https://example.com/runtime.zip.part-01")!,
+                    compressedSize: 40
+                ),
+            ],
+            compressedSize: 100,
+            installedSize: 200,
+            sha256: String(repeating: "b", count: 64),
+            tools: ["pdflatex": "bin/pdflatex"]
+        )
+        let multipartManifest = RuntimeManifest(
+            schemaVersion: 1,
+            runtimeVersion: "2026.1",
+            texLiveYear: 2026,
+            assets: [multipart]
+        )
+        try RuntimeManager.validate(multipartManifest)
+        let decoded = try JSONDecoder().decode(
+            RuntimeManifest.self,
+            from: JSONEncoder().encode(multipartManifest)
+        )
+        #expect(decoded == multipartManifest)
+        #expect(decoded.assets[0].archiveParts.count == 2)
+    }
+
+    @Test
+    func concatenatesMultipartRuntimeArchive() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let first = temporary.appendingPathComponent("part-00")
+        let second = temporary.appendingPathComponent("part-01")
+        let combined = temporary.appendingPathComponent("runtime.zip")
+        try Data("hello ".utf8).write(to: first)
+        try Data("runtime".utf8).write(to: second)
+
+        try RuntimeManager.concatenateArchiveParts([first, second], to: combined)
+
+        #expect(try Data(contentsOf: combined) == Data("hello runtime".utf8))
     }
 
     @Test
@@ -235,6 +284,33 @@ struct LighTexTests {
 
         #expect(status.engines[.pdfLaTeX]?.url.standardizedFileURL == executable.standardizedFileURL)
         #expect(status.engines[.pdfLaTeX]?.version == "pdfTeX fixture 1.0")
+    }
+
+    @Test
+    func preservesTeXFormatSymlinkName() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let target = temporary.appendingPathComponent("pdftex")
+        try "#!/bin/sh\necho 'pdfTeX fixture 1.0'\n".write(
+            to: target,
+            atomically: true,
+            encoding: .utf8
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: target.path
+        )
+        let symlink = temporary.appendingPathComponent("pdflatex")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+
+        let status = ToolchainService.detectSystemSynchronously(
+            environment: ["PATH": temporary.path]
+        )
+
+        #expect(status.engines[.pdfLaTeX]?.url.lastPathComponent == "pdflatex")
     }
 
     @Test

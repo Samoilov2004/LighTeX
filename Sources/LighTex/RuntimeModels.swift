@@ -58,7 +58,8 @@ struct RuntimeManifest: Codable, Equatable, Sendable {
 struct RuntimeAsset: Codable, Equatable, Identifiable, Sendable {
     let variant: RuntimeVariant
     let architecture: RuntimeArchitecture
-    let downloadURL: URL
+    let downloadURL: URL?
+    let downloadParts: [RuntimeArchivePart]?
     let compressedSize: Int64
     let installedSize: Int64
     let sha256: String
@@ -67,6 +68,41 @@ struct RuntimeAsset: Codable, Equatable, Identifiable, Sendable {
 
     var id: String { "\(variant.rawValue)-\(architecture.rawValue)" }
     var presentedCompressedSize: Int64 { displayCompressedSize ?? compressedSize }
+
+    var archiveParts: [RuntimeArchivePart] {
+        if let downloadParts, !downloadParts.isEmpty {
+            return downloadParts
+        }
+        guard let downloadURL else { return [] }
+        return [RuntimeArchivePart(downloadURL: downloadURL, compressedSize: compressedSize)]
+    }
+
+    init(
+        variant: RuntimeVariant,
+        architecture: RuntimeArchitecture,
+        downloadURL: URL? = nil,
+        downloadParts: [RuntimeArchivePart]? = nil,
+        compressedSize: Int64,
+        installedSize: Int64,
+        sha256: String,
+        tools: [String: String],
+        displayCompressedSize: Int64? = nil
+    ) {
+        self.variant = variant
+        self.architecture = architecture
+        self.downloadURL = downloadURL
+        self.downloadParts = downloadParts
+        self.compressedSize = compressedSize
+        self.installedSize = installedSize
+        self.sha256 = sha256
+        self.tools = tools
+        self.displayCompressedSize = displayCompressedSize
+    }
+}
+
+struct RuntimeArchivePart: Codable, Equatable, Sendable {
+    let downloadURL: URL
+    let compressedSize: Int64
 }
 
 struct ManagedRuntimeRecord: Codable, Equatable, Sendable {

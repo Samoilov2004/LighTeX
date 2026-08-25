@@ -21,6 +21,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--variant", required=True)
 parser.add_argument("--architecture", required=True)
 parser.add_argument("--archive", type=Path, required=True)
+parser.add_argument("--archive-part", type=Path, action="append", default=[])
 parser.add_argument("--payload", type=Path, required=True)
 parser.add_argument("--bin-relative", required=True)
 parser.add_argument("--output", type=Path, required=True)
@@ -39,4 +40,9 @@ metadata = {
     "sha256": sha256(args.archive),
     "tools": tools,
 }
+if args.archive_part:
+    metadata["archiveParts"] = [
+        {"archiveName": part.name, "compressedSize": part.stat().st_size}
+        for part in args.archive_part
+    ]
 args.output.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
