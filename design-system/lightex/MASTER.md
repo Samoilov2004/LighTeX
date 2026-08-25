@@ -39,6 +39,7 @@ This file is the visual source of truth for the native macOS application.
 - PDF minimum: 320 pt; user can hide it when width is constrained.
 - Panels are separated by draggable native split dividers, not cards.
 - Source text uses a compact 6 pt horizontal and 8 pt vertical inset from its gutter, matching dense web-based code editors.
+- Line numbers are vertically centered in the exact TextKit line fragment used by their source line.
 
 ## Components
 
@@ -52,6 +53,7 @@ This file is the visual source of truth for the native macOS application.
 - The sidebar starts directly with the file tree and uses a lower resizable Outline pane for document headings.
 - Recompile is the primary toolbar action; Auto Compile is a secondary toggle beside it.
 - Problems panel stays collapsed until requested or a build fails.
+- Clearing Recent Projects always requires confirmation and states that project folders and files remain on the Mac.
 
 ## Motion
 

@@ -602,6 +602,14 @@ func sourceLineNumber(atUTF16Location location: Int, in text: NSString) -> Int {
     return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
 }
 
+func centeredLineNumberOriginY(
+    lineTop: CGFloat,
+    lineHeight: CGFloat,
+    textHeight: CGFloat
+) -> CGFloat {
+    lineTop + max(0, (lineHeight - textHeight) / 2)
+}
+
 private enum SyntaxHighlighter {
     static func apply(
         to storage: NSTextStorage,
@@ -691,7 +699,15 @@ final class LineNumberRulerView: NSRulerView {
         )
         let string = textView.string as NSString
         guard string.length > 0 else {
-            drawLineNumber(1, y: textView.textContainerInset.height - visibleRect.minY)
+            let lineHeight = max(
+                layoutManager.extraLineFragmentRect.height,
+                layoutManager.defaultLineHeight(for: textView.font ?? .systemFont(ofSize: 13))
+            )
+            drawLineNumber(
+                1,
+                lineTop: textView.textContainerInset.height - visibleRect.minY,
+                lineHeight: lineHeight
+            )
             return
         }
 
@@ -706,10 +722,14 @@ final class LineNumberRulerView: NSRulerView {
                 forCharacterRange: lineRange,
                 actualCharacterRange: nil
             )
-            var lineRect = layoutManager.boundingRect(forGlyphRange: lineGlyphRange, in: textContainer)
+            guard lineGlyphRange.length > 0 else { break }
+            var lineRect = layoutManager.lineFragmentRect(
+                forGlyphAt: lineGlyphRange.location,
+                effectiveRange: nil
+            )
             lineRect.origin.y += textView.textContainerInset.height
             let y = lineRect.minY - visibleRect.minY
-            drawLineNumber(lineNumber, y: y)
+            drawLineNumber(lineNumber, lineTop: y, lineHeight: lineRect.height)
 
             let next = NSMaxRange(lineRange)
             if next <= location || next >= string.length { break }
@@ -726,21 +746,27 @@ final class LineNumberRulerView: NSRulerView {
                trailingRect.minY <= visibleRect.maxY {
                 drawLineNumber(
                     sourceLineNumber(atUTF16Location: string.length, in: string),
-                    y: y
+                    lineTop: y,
+                    lineHeight: trailingRect.height
                 )
             }
         }
     }
 
-    private func drawLineNumber(_ number: Int, y: CGFloat) {
+    private func drawLineNumber(_ number: Int, lineTop: CGFloat, lineHeight: CGFloat) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular),
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
         let text = "\(number)" as NSString
         let size = text.size(withAttributes: attributes)
+        let centeredY = centeredLineNumberOriginY(
+            lineTop: lineTop,
+            lineHeight: lineHeight,
+            textHeight: size.height
+        )
         text.draw(
-            at: NSPoint(x: ruleThickness - size.width - 8, y: y),
+            at: NSPoint(x: ruleThickness - size.width - 8, y: centeredY),
             withAttributes: attributes
         )
     }

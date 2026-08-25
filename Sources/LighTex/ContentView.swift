@@ -184,6 +184,7 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var confirmsClearingRecentProjects = false
 
     var body: some View {
         ZStack {
@@ -277,11 +278,12 @@ private struct WelcomeView: View {
                 Spacer()
                 if !model.recentProjects.isEmpty {
                     Button("Clear") {
-                        model.clearRecentProjects()
+                        confirmsClearingRecentProjects = true
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Clear Recent Projects")
                 }
             }
             .padding(.bottom, 8)
@@ -303,6 +305,17 @@ private struct WelcomeView: View {
                     Divider()
                 }
             }
+        }
+        .alert(
+            "Clear Recent Projects?",
+            isPresented: $confirmsClearingRecentProjects
+        ) {
+            Button("Clear History", role: .destructive) {
+                model.clearRecentProjects()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all projects from LighTex's recent-projects list. Your project folders and files will remain on your Mac.")
         }
     }
 }

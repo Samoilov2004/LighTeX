@@ -225,6 +225,24 @@ struct LighTexTests {
         #expect(sourceLineNumber(atUTF16Location: source.length, in: source) == 3)
     }
 
+    @Test
+    func verticallyCentersLineNumbersInsideEditorLines() {
+        #expect(
+            centeredLineNumberOriginY(
+                lineTop: 10,
+                lineHeight: 18,
+                textHeight: 12
+            ) == 13
+        )
+        #expect(
+            centeredLineNumberOriginY(
+                lineTop: 10,
+                lineHeight: 10,
+                textHeight: 12
+            ) == 10
+        )
+    }
+
     @Test @MainActor
     func startsAtProjectHubByDefault() {
         let testDefaults = makeIsolatedDefaults()
@@ -542,6 +560,10 @@ struct LighTexTests {
         model.closeProject()
         #expect(model.hasProject == false)
         #expect(model.recentProjects.map(\.name) == ["EmptyBook"])
+
+        model.clearRecentProjects()
+        #expect(model.recentProjects.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: mainFile.path))
     }
 
     @Test @MainActor
