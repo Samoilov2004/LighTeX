@@ -18,6 +18,30 @@
   <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.2-x86_64.dmg">Download for an Intel Mac</a>
 </p>
 
+> [!IMPORTANT]
+> **macOS may block LighTex on the first launch.**
+>
+> LighTex is currently distributed directly through GitHub and is **not notarized by Apple yet**.
+> This means macOS Gatekeeper may show a warning even though you intentionally downloaded the app.
+>
+> To open LighTex:
+>
+> 1. Move **LighTex** to your **Applications** folder.
+> 2. In Finder, Control-click (or right-click) **LighTex**.
+> 3. Choose **Open**.
+> 4. Click **Open** again in the confirmation dialog.
+>
+> If macOS still blocks the app, open:
+>
+> **System Settings → Privacy & Security**
+>
+> Scroll down to the **Security** section and click **Open Anyway** next to LighTex.
+>
+> You normally only need to do this once.
+>
+> **Do not disable Gatekeeper globally.**
+
+
 ## Install
 
 1. Download the DMG using the button above.
