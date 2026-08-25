@@ -174,7 +174,7 @@ struct LighTexTests {
     }
 
     @Test @MainActor
-    func completesLatexEnvironmentOnReturn() {
+    func completesLatexEnvironmentAfterNativePreviewOnReturn() {
         let textView = CodeTextView()
         textView.editorTabWidth = 4
         textView.string = "  \\begin{eq}"
@@ -191,7 +191,20 @@ struct LighTexTests {
         #expect(context?.replacementRange.length == 3)
         #expect(latexEnvironmentCompletions(for: "eq") == ["equation", "equation*"])
 
-        textView.insertNewline(nil)
+        textView.insertCompletion(
+            "equation",
+            forPartialWordRange: context!.partialRange,
+            movement: NSTextMovement.return.rawValue,
+            isFinal: false
+        )
+        #expect(textView.string == "  \\begin{eq}")
+
+        textView.insertCompletion(
+            "equation",
+            forPartialWordRange: context!.partialRange,
+            movement: NSTextMovement.return.rawValue,
+            isFinal: true
+        )
 
         #expect(
             textView.string
@@ -201,6 +214,15 @@ struct LighTexTests {
             textView.selectedRange().location
                 == ("  \\begin{equation}\n      " as NSString).length
         )
+    }
+
+    @Test
+    func numbersTheTrailingEmptySourceLine() {
+        let source = "first\nsecond\n" as NSString
+
+        #expect(sourceLineNumber(atUTF16Location: 0, in: source) == 1)
+        #expect(sourceLineNumber(atUTF16Location: 6, in: source) == 2)
+        #expect(sourceLineNumber(atUTF16Location: source.length, in: source) == 3)
     }
 
     @Test @MainActor

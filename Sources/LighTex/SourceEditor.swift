@@ -372,10 +372,22 @@ final class CodeTextView: NSTextView {
         movement: Int,
         isFinal flag: Bool
     ) {
-        if flag,
-           movement != NSTextMovement.cancel.rawValue,
-           latexEnvironmentNames.contains(word),
-           insertLatexEnvironment(word) {
+        guard latexEnvironmentNames.contains(word) else {
+            super.insertCompletion(
+                word,
+                forPartialWordRange: charRange,
+                movement: movement,
+                isFinal: flag
+            )
+            return
+        }
+
+        // AppKit normally previews the highlighted completion by replacing the
+        // partial word. Keeping the source unchanged until confirmation lets us
+        // expand the whole LaTeX environment atomically on Return or Tab.
+        guard flag else { return }
+        guard movement != NSTextMovement.cancel.rawValue else { return }
+        if insertLatexEnvironment(word) {
             return
         }
         super.insertCompletion(
@@ -583,6 +595,13 @@ func latexEnvironmentCompletionContext(
     )
 }
 
+func sourceLineNumber(atUTF16Location location: Int, in text: NSString) -> Int {
+    let safeLocation = min(max(0, location), text.length)
+    guard safeLocation > 0 else { return 1 }
+    let prefix = text.substring(to: safeLocation)
+    return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+}
+
 private enum SyntaxHighlighter {
     static func apply(
         to storage: NSTextStorage,
@@ -677,8 +696,7 @@ final class LineNumberRulerView: NSRulerView {
         }
 
         let safeStart = min(characterRange.location, string.length)
-        let prefix = string.substring(to: safeStart)
-        var lineNumber = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        var lineNumber = sourceLineNumber(atUTF16Location: safeStart, in: string)
         var location = safeStart
         let limit = min(NSMaxRange(characterRange), string.length)
 
@@ -697,6 +715,20 @@ final class LineNumberRulerView: NSRulerView {
             if next <= location || next >= string.length { break }
             location = next
             lineNumber += 1
+        }
+
+        if string.character(at: string.length - 1) == 10,
+           layoutManager.extraLineFragmentTextContainer === textContainer {
+            var trailingRect = layoutManager.extraLineFragmentRect
+            trailingRect.origin.y += textView.textContainerInset.height
+            let y = trailingRect.minY - visibleRect.minY
+            if trailingRect.maxY >= visibleRect.minY,
+               trailingRect.minY <= visibleRect.maxY {
+                drawLineNumber(
+                    sourceLineNumber(atUTF16Location: string.length, in: string),
+                    y: y
+                )
+            }
         }
     }
 
