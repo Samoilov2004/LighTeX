@@ -184,6 +184,7 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var confirmsClearingRecentProjects = false
 
     var body: some View {
         ZStack {
@@ -277,11 +278,12 @@ private struct WelcomeView: View {
                 Spacer()
                 if !model.recentProjects.isEmpty {
                     Button("Clear") {
-                        model.clearRecentProjects()
+                        confirmsClearingRecentProjects = true
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Clear Recent Projects")
                 }
             }
             .padding(.bottom, 8)
@@ -303,6 +305,17 @@ private struct WelcomeView: View {
                     Divider()
                 }
             }
+        }
+        .alert(
+            "Clear Recent Projects?",
+            isPresented: $confirmsClearingRecentProjects
+        ) {
+            Button("Clear History", role: .destructive) {
+                model.clearRecentProjects()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all projects from LighTex's recent-projects list. Your project folders and files will remain on your Mac.")
         }
     }
 }
@@ -465,6 +478,7 @@ private struct WorkspaceView: View {
 
 private struct ProjectNavigator: View {
     @EnvironmentObject private var model: AppModel
+    @State private var creationKind: ProjectItemCreationKind?
 
     var body: some View {
         VSplitView {
@@ -475,72 +489,103 @@ private struct ProjectNavigator: View {
                 .frame(minHeight: 120, idealHeight: 220)
         }
         .background(LighTexTheme.sidebarBackground)
+        .sheet(item: $creationKind) { kind in
+            ProjectItemCreationSheet(kind: kind) { name in
+                switch kind {
+                case .file:
+                    model.createProjectFile(named: name)
+                case .folder:
+                    model.createProjectFolder(named: name)
+                }
+            }
+        }
     }
 
-    @ViewBuilder
     private var projectFiles: some View {
-        if model.projectTree.isEmpty {
-            VStack(spacing: 7) {
-                Image(systemName: "doc")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.tertiary)
-                Text("No supported files")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Add a .tex file and refresh the project.")
-                    .font(.system(size: 11))
+        VStack(spacing: 0) {
+            HStack(spacing: 3) {
+                Text("FILES")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+
+                Spacer()
+
+                ProjectNavigatorActionButton(
+                    title: "Create File",
+                    systemImage: "doc.badge.plus"
+                ) {
+                    creationKind = .file
+                }
+                ProjectNavigatorActionButton(
+                    title: "Create Folder",
+                    systemImage: "folder.badge.plus"
+                ) {
+                    creationKind = .folder
+                }
+                ProjectNavigatorActionButton(
+                    title: "Upload File",
+                    systemImage: "square.and.arrow.up"
+                ) {
+                    model.importProjectFiles()
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(20)
-        } else {
-            List(selection: $model.navigatorSelection) {
-                OutlineGroup(model.projectTree, children: \.children) { item in
-                    HStack(spacing: 6) {
-                        Image(systemName: item.iconName)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16)
-                        Text(item.name)
-                            .font(.system(size: 12.5))
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        if item.url == model.entryFileURL {
-                            Text("MAIN")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .tag(item.url)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if !item.isDirectory {
-                            model.activateNavigatorItem(item.url)
-                        }
-                    }
-                    .contextMenu {
-                        if !item.isDirectory {
-                            Button("Open") {
+            .padding(.horizontal, 9)
+            .frame(height: 34)
+
+            Divider()
+
+            if model.projectTree.isEmpty {
+                VStack(spacing: 7) {
+                    Image(systemName: "doc.badge.plus")
+                        .font(.system(size: 21))
+                        .foregroundStyle(.tertiary)
+                    Text("No files yet")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Create a file or add one from your Mac.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(20)
+            } else {
+                List(selection: $model.navigatorSelection) {
+                    OutlineGroup(model.projectTree, children: \.children) { item in
+                        ProjectFileTreeRow(
+                            item: item,
+                            isMainDocument: item.url == model.entryFileURL
+                        )
+                        .tag(item.url)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if !item.isDirectory {
                                 model.activateNavigatorItem(item.url)
                             }
-                            if item.url.pathExtension.lowercased() == "tex" {
-                                Button("Use as Main Document") {
-                                    model.setEntryFile(item.url)
-                                }
-                            }
-                            Divider()
                         }
-                        Button("Reveal in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                        .contextMenu {
+                            if !item.isDirectory {
+                                Button("Open") {
+                                    model.activateNavigatorItem(item.url)
+                                }
+                                if item.url.pathExtension.lowercased() == "tex" {
+                                    Button("Use as Main Document") {
+                                        model.setEntryFile(item.url)
+                                    }
+                                }
+                                Divider()
+                            }
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                            }
                         }
                     }
                 }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .onChange(of: model.navigatorSelection) { _, selection in
-                if let selection {
-                    model.activateNavigatorItem(selection)
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .onChange(of: model.navigatorSelection) { _, selection in
+                    if let selection {
+                        model.activateNavigatorItem(selection)
+                    }
                 }
             }
         }
@@ -548,7 +593,11 @@ private struct ProjectNavigator: View {
 
     private var documentOutline: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.indent")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
                 Text("OUTLINE")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -564,47 +613,211 @@ private struct ProjectNavigator: View {
                 .accessibilityLabel("Refresh files and outline")
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: 34)
 
             Divider()
 
             if model.outlineItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 6) {
+                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.tertiary)
                     Text("No sections yet")
                         .font(.system(size: 12, weight: .medium))
                     Text("Chapters and sections will appear here.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(16)
             } else {
                 List(model.outlineItems) { item in
                     Button {
                         model.openOutlineItem(item)
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "text.alignleft")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 12)
-                            Text(item.title)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                        }
-                        .padding(.leading, CGFloat(item.level) * 11)
-                        .contentShape(Rectangle())
+                        OutlineNavigatorRow(item: item)
                     }
                     .buttonStyle(.plain)
                     .help("\(item.fileURL.lastPathComponent), line \(item.line)")
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
         .background(LighTexTheme.sidebarBackground)
+    }
+}
+
+private enum ProjectItemCreationKind: String, Identifiable {
+    case file
+    case folder
+
+    var id: String { rawValue }
+    var title: String { self == .file ? "Create File" : "Create Folder" }
+    var prompt: String { self == .file ? "File Name" : "Folder Name" }
+    var defaultName: String { self == .file ? "untitled.tex" : "New Folder" }
+    var icon: String { self == .file ? "doc.badge.plus" : "folder.badge.plus" }
+}
+
+private struct ProjectItemCreationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let kind: ProjectItemCreationKind
+    let onCreate: (String) -> Bool
+    @State private var name: String
+    @FocusState private var nameIsFocused: Bool
+
+    init(kind: ProjectItemCreationKind, onCreate: @escaping (String) -> Bool) {
+        self.kind = kind
+        self.onCreate = onCreate
+        _name = State(initialValue: kind.defaultName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 9) {
+                Image(systemName: kind.icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(kind.title)
+                    .font(.system(size: 17, weight: .semibold))
+            }
+
+            TextField(kind.prompt, text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameIsFocused)
+                .accessibilityLabel(kind.prompt)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Create") {
+                    if onCreate(name) {
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear {
+            nameIsFocused = true
+        }
+    }
+}
+
+private struct ProjectNavigatorActionButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12.5, weight: .medium))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct ProjectFileTreeRow: View {
+    let item: ProjectItem
+    let isMainDocument: Bool
+
+    @ViewBuilder
+    var body: some View {
+        if item.isDirectory {
+            row
+        } else {
+            row
+                .onDrag {
+                    NSItemProvider(object: item.url as NSURL)
+                } preview: {
+                    HStack(spacing: 6) {
+                        Image(systemName: item.iconName)
+                            .foregroundStyle(.secondary)
+                        Text(item.name)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 12.5, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .help("Drag to the tab bar to open \(item.name)")
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.iconName)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(item.name)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if isMainDocument {
+                Text("MAIN")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct OutlineNavigatorRow: View {
+    let item: DocumentOutlineItem
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if item.level == 0 {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.72))
+                    .frame(width: 2, height: 15)
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(item.level == 1 ? 0.55 : 0.32))
+                    .frame(width: 4, height: 4)
+            }
+
+            Text(item.title)
+                .font(.system(
+                    size: item.level == 0 ? 12.5 : 12,
+                    weight: item.level == 0 ? .medium : .regular
+                ))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.leading, 8 + CGFloat(item.level) * 13)
+        .padding(.trailing, 8)
+        .frame(minHeight: 29)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isHovering ? LighTexTheme.hover : .clear)
+                .padding(.horizontal, 4)
+        )
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -615,6 +828,7 @@ private struct EditorWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             EditorTabBar()
+                .zIndex(1)
 
             if let document = model.selectedDocument {
                 SourceEditor(
@@ -629,9 +843,13 @@ private struct EditorWorkspace: View {
                     autoCloseBrackets: settings.autoCloseBrackets,
                     jumpLine: document.jumpLine,
                     jumpToken: document.jumpToken,
-                    onCursorChange: model.updateCursor
+                    onCursorChange: model.updateCursor,
+                    onWordDoubleClick: { line, column in
+                        model.jumpPDF(toSource: document.url, line: line, column: column)
+                    }
                 )
                 .id(document.id)
+                .clipped()
             } else {
                 EmptyWorkspaceState(
                     icon: "doc.text",
@@ -644,46 +862,225 @@ private struct EditorWorkspace: View {
     }
 }
 
+struct EditorTabDropIndicator: Equatable {
+    let targetDocumentID: URL
+    let placement: DocumentMovePlacement
+}
+
+private struct EditorTabsContentWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct EditorTabFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [URL: CGRect] = [:]
+
+    static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+func editorTabDropIndicator(
+    locationX: CGFloat,
+    orderedDocumentIDs: [URL],
+    frames: [URL: CGRect]
+) -> EditorTabDropIndicator? {
+    let visible = orderedDocumentIDs.compactMap { id in
+        frames[id].map { (id, $0) }
+    }
+    guard let first = visible.first, let last = visible.last else { return nil }
+
+    if locationX < first.1.midX {
+        return EditorTabDropIndicator(targetDocumentID: first.0, placement: .before)
+    }
+    for (id, frame) in visible.dropFirst() where locationX < frame.midX {
+        return EditorTabDropIndicator(targetDocumentID: id, placement: .before)
+    }
+    return EditorTabDropIndicator(targetDocumentID: last.0, placement: .after)
+}
+
 private struct EditorTabBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
+    @State private var draggedDocumentID: URL?
+    @State private var dropIndicator: EditorTabDropIndicator?
+    @State private var isFileDropTarget = false
+    @State private var tabsContentWidth: CGFloat = 0
+    @State private var tabFrames: [URL: CGRect] = [:]
+    @State private var draggedDocument: EditorDocument?
+    @State private var draggedTabWidth: CGFloat = 0
+    @State private var dragLocationX: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(model.openDocuments) { document in
-                        EditorTab(
-                            document: document,
-                            isActive: document.id == model.selectedDocumentID
-                        )
-                    }
-                }
-            }
-
-            if model.openDocuments.count > 1 {
-                Menu {
-                    ForEach(model.openDocuments) { document in
-                        Button {
-                            model.selectDocument(document.url)
-                        } label: {
-                            if document.id == model.selectedDocumentID {
-                                Label(document.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(document.displayName)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
+                        HStack(spacing: 0) {
+                            ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
+                                let isActive = document.id == model.selectedDocumentID
+                                let nextIsActive = visibleDocuments.indices.contains(index + 1)
+                                    && visibleDocuments[index + 1].id == model.selectedDocumentID
+                                EditorTab(
+                                    document: document,
+                                    isActive: isActive,
+                                    showsTrailingSeparator: !isActive
+                                        && !nextIsActive
+                                        && index < visibleDocuments.count - 1,
+                                    dropIndicator: $dropIndicator
+                                )
                             }
                         }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: EditorTabsContentWidthPreferenceKey.self,
+                                    value: proxy.size.width
+                                )
+                            }
+                        }
+
+                        ProjectFileDropReceiver(
+                            onDrop: openFirstDroppedProjectFile,
+                            onTargeted: { isFileDropTarget = $0 }
+                        )
+                            .frame(
+                                width: max(44, geometry.size.width - tabsContentWidth),
+                                height: 34
+                            )
+                            .background(
+                                isFileDropTarget
+                                    ? Color.accentColor.opacity(0.07)
+                                    : LighTexTheme.secondaryBackground
+                            )
                     }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .frame(width: 28, height: 28)
+                    .frame(
+                        width: max(geometry.size.width, tabsContentWidth + 44),
+                        height: 34,
+                        alignment: .leading
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.12),
+                        value: model.openDocuments.map(\.id)
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.12),
+                        value: draggedDocumentID
+                    )
                 }
-                .menuStyle(.borderlessButton)
-                .help("Show open files")
-                .accessibilityLabel("Show open files")
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let draggedDocument {
+                    EditorTabDragPreview(document: draggedDocument)
+                        .frame(
+                            width: max(80, draggedTabWidth),
+                            height: 34
+                        )
+                        .position(
+                            x: min(max(dragLocationX, draggedTabWidth / 2), geometry.size.width - draggedTabWidth / 2),
+                            y: 17
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
+            .coordinateSpace(name: "EditorTabBar")
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .named("EditorTabBar"))
+                    .onChanged(handleTabDrag)
+                    .onEnded { value in
+                        updateTabPlacement(at: value.location.x)
+                        finishTabDrag()
+                    }
+            )
+        }
+        .frame(height: 34)
+        .onPreferenceChange(EditorTabsContentWidthPreferenceKey.self) { width in
+            tabsContentWidth = max(0, width)
+        }
+        .onPreferenceChange(EditorTabFramePreferenceKey.self) { frames in
+            tabFrames = frames
+        }
+        .background(
+            isFileDropTarget
+                ? Color.accentColor.opacity(0.07)
+                : LighTexTheme.secondaryBackground
+        )
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in
+            return openFirstDroppedProjectFile(urls)
+        } isTargeted: { isTargeted in
+            isFileDropTarget = isTargeted
+        }
+        .accessibilityLabel("Open editor tabs")
+        .task(id: draggedDocumentID) {
+            guard draggedDocumentID != nil else { return }
+
+            while !Task.isCancelled, NSEvent.pressedMouseButtons & 1 != 0 {
+                try? await Task.sleep(nanoseconds: 40_000_000)
+            }
+
+            if !Task.isCancelled {
+                finishTabDrag()
             }
         }
-        .background(LighTexTheme.secondaryBackground)
-        .frame(height: 34)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            finishTabDrag()
+        }
+        .onDisappear {
+            finishTabDrag()
+        }
+    }
+
+    private func handleTabDrag(_ value: DragGesture.Value) {
+        if draggedDocumentID == nil {
+            guard let source = model.openDocuments.first(where: { document in
+                guard let frame = tabFrames[document.id] else { return false }
+                return frame.contains(value.startLocation)
+                    && value.startLocation.x < frame.maxX - 28
+            }), let sourceFrame = tabFrames[source.id] else {
+                return
+            }
+            draggedDocumentID = source.id
+            draggedDocument = source
+            draggedTabWidth = sourceFrame.width
+        }
+        dragLocationX = value.location.x
+        updateTabPlacement(at: value.location.x)
+    }
+
+    private func updateTabPlacement(at locationX: CGFloat) {
+        guard let draggedDocumentID else { return }
+        let visibleIDs = model.openDocuments.map(\.id).filter { $0 != draggedDocumentID }
+        guard let indicator = editorTabDropIndicator(
+            locationX: locationX,
+            orderedDocumentIDs: visibleIDs,
+            frames: tabFrames
+        ), indicator != dropIndicator else {
+            return
+        }
+        dropIndicator = indicator
+        model.moveDocument(
+            draggedDocumentID,
+            relativeTo: indicator.targetDocumentID,
+            placement: indicator.placement
+        )
+    }
+
+    private func finishTabDrag() {
+        draggedDocumentID = nil
+        draggedDocument = nil
+        draggedTabWidth = 0
+        dropIndicator = nil
+    }
+
+    private func openFirstDroppedProjectFile(_ urls: [URL]) -> Bool {
+        guard let url = urls.first(where: \.isFileURL) else { return false }
+        return model.openDroppedProjectItem(atPath: url.path)
     }
 }
 
@@ -691,31 +1088,45 @@ private struct EditorTab: View {
     @EnvironmentObject private var model: AppModel
     let document: EditorDocument
     let isActive: Bool
+    let showsTrailingSeparator: Bool
+    @Binding var dropIndicator: EditorTabDropIndicator?
     @State private var isHovering = false
+    @FocusState private var isSelectionFocused: Bool
 
     var body: some View {
-        HStack(spacing: 7) {
-            Button {
-                model.selectDocument(document.url)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text(document.displayName)
-                        .font(.system(size: 12, weight: isActive ? .medium : .regular))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if document.isDirty {
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 6, height: 6)
-                            .accessibilityLabel("Unsaved changes")
-                    }
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(document.displayName)
+                    .font(.system(size: 12, weight: isActive ? .medium : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if document.isDirty {
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .padding(.leading, 10)
+            .padding(.trailing, 7)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.selectDocument(document.url)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(document.isDirty
+                ? "\(document.displayName), unsaved changes"
+                : document.displayName)
+            .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction {
+                model.selectDocument(document.url)
+            }
+            .help("Select or drag \(document.displayName)")
 
             Button {
                 model.closeDocument(document.url)
@@ -730,18 +1141,240 @@ private struct EditorTab: View {
             .opacity(isActive || isHovering ? 1 : 0)
             .help("Close \(document.displayName)")
             .accessibilityLabel("Close \(document.displayName)")
+            .padding(.trailing, 6)
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 6)
         .frame(height: 34)
-        .background(isActive ? Color.white : (isHovering ? LighTexTheme.hover : .clear))
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(LighTexTheme.divider)
-                .frame(width: 1)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tabSurfaceColor)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 3)
         }
+        .overlay(alignment: .trailing) {
+            if showsTrailingSeparator {
+                Rectangle()
+                    .fill(LighTexTheme.divider)
+                    .frame(width: 1, height: 18)
+            }
+        }
+        .overlay {
+            if isActive || isSelectionFocused {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        Color.accentColor.opacity(isSelectionFocused ? 0.82 : 0.58),
+                        lineWidth: 1
+                    )
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 3)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: insertionAlignment) {
+            if dropIndicator?.targetDocumentID == document.id {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.accentColor)
+                    .frame(width: 2, height: 24)
+                    .padding(.horizontal, 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: EditorTabFramePreferenceKey.self,
+                        value: [
+                            document.id: proxy.frame(in: .named("EditorTabBar"))
+                        ]
+                    )
+            }
+        }
+        .focusable()
+        .focused($isSelectionFocused)
+        .focusEffectDisabled()
         .onHover { isHovering = $0 }
+        .contextMenu {
+            if let index = model.openDocuments.firstIndex(where: { $0.id == document.id }) {
+                Button("Move Tab Left") {
+                    guard index > 0 else { return }
+                    model.moveDocument(
+                        document.id,
+                        relativeTo: model.openDocuments[index - 1].id,
+                        placement: .before
+                    )
+                }
+                .disabled(index == 0)
+
+                Button("Move Tab Right") {
+                    guard index + 1 < model.openDocuments.count else { return }
+                    model.moveDocument(
+                        document.id,
+                        relativeTo: model.openDocuments[index + 1].id,
+                        placement: .after
+                    )
+                }
+                .disabled(index + 1 == model.openDocuments.count)
+
+                Divider()
+            }
+
+            Button("Close Tab") {
+                model.closeDocument(document.url)
+            }
+        }
     }
+
+    private var tabSurfaceColor: Color {
+        if isActive {
+            return Color.white
+        }
+        return isHovering ? LighTexTheme.hover : Color.clear
+    }
+
+    private var insertionAlignment: Alignment {
+        guard let dropIndicator,
+              dropIndicator.targetDocumentID == document.id else {
+            return .leading
+        }
+        return dropIndicator.placement == .before ? .leading : .trailing
+    }
+}
+
+private struct EditorTabDragPreview: View {
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            Text(document.displayName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            if document.isDirty {
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+            }
+
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.58), lineWidth: 1)
+        }
+        .accessibilityLabel("Moving \(document.displayName)")
+    }
+}
+
+func droppedFilePath(from item: NSSecureCoding?) -> String? {
+    if let url = item as? URL {
+        return url.path
+    }
+    if let url = item as? NSURL {
+        return url.path
+    }
+    if let data = item as? Data,
+       let value = String(data: data, encoding: .utf8),
+       let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+       url.isFileURL {
+        return url.path
+    }
+    if let value = item as? String {
+        if let url = URL(string: value), url.isFileURL {
+            return url.path
+        }
+        return value
+    }
+    return nil
+}
+
+private struct ProjectFileDropReceiver: NSViewRepresentable {
+    let onDrop: ([URL]) -> Bool
+    let onTargeted: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ProjectFileDropReceivingView {
+        let view = ProjectFileDropReceivingView()
+        view.onDrop = onDrop
+        view.onTargeted = onTargeted
+        return view
+    }
+
+    func updateNSView(_ nsView: ProjectFileDropReceivingView, context: Context) {
+        nsView.onDrop = onDrop
+        nsView.onTargeted = onTargeted
+    }
+}
+
+@MainActor
+private final class ProjectFileDropReceivingView: NSView {
+    var onDrop: (([URL]) -> Bool)?
+    var onTargeted: ((Bool) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard draggedFileURLs(from: sender) != nil else { return [] }
+        onTargeted?(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggedFileURLs(from: sender) == nil ? [] : .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onTargeted?(false)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { onTargeted?(false) }
+        guard let urls = draggedFileURLs(from: sender) else { return false }
+        return onDrop?(urls) ?? false
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        onTargeted?(false)
+    }
+
+    private func draggedFileURLs(from sender: NSDraggingInfo) -> [URL]? {
+        let urls = projectFileURLs(from: sender.draggingPasteboard)
+        return urls.isEmpty ? nil : urls
+    }
+}
+
+func projectFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+    let options: [NSPasteboard.ReadingOptionKey: Any] = [
+        .urlReadingFileURLsOnly: true
+    ]
+    let objects = pasteboard.readObjects(
+        forClasses: [NSURL.self],
+        options: options
+    ) as? [NSURL] ?? []
+    return objects.map { $0 as URL }.filter(\.isFileURL)
 }
 
 private struct PDFWorkspace: View {

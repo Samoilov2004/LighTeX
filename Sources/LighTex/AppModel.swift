@@ -2,6 +2,11 @@ import AppKit
 import Combine
 import Foundation
 
+enum DocumentMovePlacement: Sendable, Equatable {
+    case before
+    case after
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var projectURL: URL?
@@ -419,6 +424,138 @@ final class AppModel: ObservableObject {
         persistOpenDocuments()
     }
 
+    func moveDocument(
+        _ sourceURL: URL,
+        relativeTo targetURL: URL,
+        placement: DocumentMovePlacement
+    ) {
+        guard sourceURL != targetURL,
+              let sourceIndex = openDocuments.firstIndex(where: { $0.url == sourceURL }),
+              openDocuments.contains(where: { $0.url == targetURL }) else {
+            return
+        }
+
+        let document = openDocuments.remove(at: sourceIndex)
+        guard let targetIndex = openDocuments.firstIndex(where: { $0.url == targetURL }) else {
+            openDocuments.insert(document, at: min(sourceIndex, openDocuments.count))
+            return
+        }
+        let insertionIndex = placement == .before ? targetIndex : targetIndex + 1
+        openDocuments.insert(document, at: min(insertionIndex, openDocuments.count))
+        persistOpenDocuments()
+    }
+
+    @discardableResult
+    func openDroppedProjectItem(atPath path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard let item = findProjectItem(url: url, in: projectTree), !item.isDirectory else {
+            return false
+        }
+        activateNavigatorItem(url)
+        return selectedDocumentID == url
+    }
+
+    func createProjectFile(named name: String) -> Bool {
+        guard let name = Self.validProjectItemName(name),
+              let directory = selectedProjectDirectory else {
+            alertMessage = "Enter a valid file name without path separators."
+            return false
+        }
+
+        let fileURL = directory.appendingPathComponent(name, isDirectory: false)
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else {
+            alertMessage = "An item named \(name) already exists in this folder."
+            return false
+        }
+
+        guard FileManager.default.createFile(atPath: fileURL.path, contents: Data()) else {
+            alertMessage = "LighTex could not create \(name)."
+            return false
+        }
+
+        refreshProject()
+        if let item = findProjectItem(url: fileURL, in: projectTree), item.isEditableText {
+            openDocument(fileURL)
+        }
+        return true
+    }
+
+    func createProjectFolder(named name: String) -> Bool {
+        guard let name = Self.validProjectItemName(name),
+              let directory = selectedProjectDirectory else {
+            alertMessage = "Enter a valid folder name without path separators."
+            return false
+        }
+
+        let folderURL = directory.appendingPathComponent(name, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: folderURL.path) else {
+            alertMessage = "An item named \(name) already exists in this folder."
+            return false
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
+            refreshProject()
+            navigatorSelection = folderURL
+            return true
+        } catch {
+            alertMessage = "LighTex could not create \(name): \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func importProjectFiles() {
+        guard let directory = selectedProjectDirectory else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Add Files to Project"
+        panel.message = "Files are copied into \(directory.lastPathComponent)."
+        panel.prompt = "Add"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+
+        guard panel.runModal() == .OK else { return }
+        var imported: [URL] = []
+        var skipped: [String] = []
+
+        for sourceURL in panel.urls {
+            let destinationURL = directory.appendingPathComponent(sourceURL.lastPathComponent)
+            guard sourceURL.standardizedFileURL != destinationURL.standardizedFileURL,
+                  !FileManager.default.fileExists(atPath: destinationURL.path) else {
+                skipped.append(sourceURL.lastPathComponent)
+                continue
+            }
+            do {
+                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+                imported.append(destinationURL)
+            } catch {
+                skipped.append(sourceURL.lastPathComponent)
+            }
+        }
+
+        refreshProject()
+        if let firstEditable = imported.first(where: {
+            findProjectItem(url: $0, in: projectTree)?.isEditableText == true
+        }) {
+            openDocument(firstEditable)
+        }
+        if !skipped.isEmpty {
+            alertMessage = "These files were not added because they already exist or could not be copied: \(skipped.joined(separator: ", "))."
+        }
+    }
+
+    static func validProjectItemName(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed != ".",
+              trimmed != "..",
+              !trimmed.contains("/"),
+              !trimmed.contains(":") else {
+            return nil
+        }
+        return trimmed
+    }
+
     func updateSelectedText(_ text: String) {
         guard let selectedDocumentID,
               let index = openDocuments.firstIndex(where: { $0.url == selectedDocumentID }),
@@ -563,13 +700,18 @@ final class AppModel: ObservableObject {
 
     func openOutlineItem(_ item: DocumentOutlineItem) {
         openDocument(item.fileURL, line: item.line)
+        jumpPDF(toSource: item.fileURL, line: item.line, column: 1)
+    }
+
+    func jumpPDF(toSource sourceURL: URL, line: Int, column: Int) {
         guard let previewPDFURL, let projectURL else { return }
         let syncTeXURL = runtimeManager.syncTeXURL
 
         Task { [weak self] in
             let target = await SyncTeXService.target(
-                forSource: item.fileURL,
-                line: item.line,
+                forSource: sourceURL,
+                line: line,
+                column: column,
                 previewPDFURL: previewPDFURL,
                 projectURL: projectURL,
                 executableURL: syncTeXURL
@@ -621,6 +763,15 @@ final class AppModel: ObservableObject {
         } catch {
             alertMessage = "LighTex could not save \(url.lastPathComponent): \(error.localizedDescription)"
         }
+    }
+
+    private var selectedProjectDirectory: URL? {
+        guard let projectURL else { return nil }
+        guard let navigatorSelection,
+              let item = findProjectItem(url: navigatorSelection, in: projectTree) else {
+            return projectURL
+        }
+        return item.isDirectory ? item.url : item.url.deletingLastPathComponent()
     }
 
     private func scheduleSave(for url: URL) {

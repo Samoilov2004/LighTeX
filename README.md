@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.2-arm64.dmg">
-    <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for Apple Silicon">
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/download/v0.6.0-beta.1/LighTex-0.6.0-beta.1-arm64.dmg">
+    <img src="https://img.shields.io/badge/Download_Beta_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download the LighTex beta for Apple Silicon">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.2-x86_64.dmg">Download for an Intel Mac</a>
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/download/v0.6.0-beta.1/LighTex-0.6.0-beta.1-x86_64.dmg">Download the beta for an Intel Mac</a>
 </p>
 
 > [!IMPORTANT]
@@ -48,7 +48,7 @@
 2. Open it and drag **LighTex** into **Applications**.
 3. Start LighTex and choose the recommended **Standard** LaTeX runtime.
 
-This first preview is not notarized by Apple yet. If macOS blocks the first
+This beta is not notarized by Apple yet. If macOS blocks the first
 launch, Control-click **LighTex** in Finder, choose **Open**, then confirm
 **Open**. You only need to do this once.
 

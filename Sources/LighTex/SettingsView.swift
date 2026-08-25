@@ -78,6 +78,7 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
+    @State private var confirmsClearingRecentProjects = false
 
     var body: some View {
         Form {
@@ -91,13 +92,24 @@ private struct GeneralSettingsView: View {
                 Toggle("Remember opened projects", isOn: $settings.keepRecentProjects)
                 LabeledContent("Stored projects", value: "\(model.recentProjects.count)")
                 Button("Clear History") {
-                    model.clearRecentProjects()
+                    confirmsClearingRecentProjects = true
                 }
                 .disabled(model.recentProjects.isEmpty)
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .alert(
+            "Clear Recent Projects?",
+            isPresented: $confirmsClearingRecentProjects
+        ) {
+            Button("Clear History", role: .destructive) {
+                model.clearRecentProjects()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all projects from LighTex's recent-projects list. Your project folders and files will remain on your Mac.")
+        }
     }
 }
 

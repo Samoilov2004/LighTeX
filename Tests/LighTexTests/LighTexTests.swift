@@ -2,6 +2,7 @@ import Testing
 import AppKit
 import CryptoKit
 import SwiftUI
+import UniformTypeIdentifiers
 @testable import LighTex
 
 struct LighTexTests {
@@ -13,6 +14,29 @@ struct LighTexTests {
     @Test
     func ignoresBuildDirectories() throws {
         #expect(try scannerIgnoresBuildDirectory())
+    }
+
+    @Test
+    func recognizesCommonProjectTextFiles() {
+        let markdown = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/README.md"),
+            isDirectory: false,
+            children: nil
+        )
+        let makefile = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/Makefile"),
+            isDirectory: false,
+            children: nil
+        )
+        let image = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/cover.png"),
+            isDirectory: false,
+            children: nil
+        )
+
+        #expect(markdown.isEditableText)
+        #expect(makefile.isEditableText)
+        #expect(!image.isEditableText)
     }
 
     @Test
@@ -52,6 +76,50 @@ struct LighTexTests {
     }
 
     @Test
+    func buildsSyncTeXSourcePositionWithColumn() {
+        let source = URL(fileURLWithPath: "/tmp/My Book/main.tex")
+        #expect(
+            SyncTeXService.sourcePositionArgument(sourceURL: source, line: 17, column: 9)
+                == "17:9:/tmp/My Book/main.tex"
+        )
+    }
+
+    @Test
+    func projectFileDragUsesNativeFileURLRepresentation() {
+        let url = URL(fileURLWithPath: "/tmp/main.tex")
+        let provider = NSItemProvider(object: url as NSURL)
+        let pasteboard = NSPasteboard(name: .init("LighTexTests.fileDrop.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+
+        #expect(provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier))
+        #expect(droppedFilePath(from: url as NSURL) == url.path)
+        #expect(droppedFilePath(from: url.absoluteString as NSString) == url.path)
+        #expect(projectFileURLs(from: pasteboard) == [url])
+    }
+
+    @Test
+    func resolvesTwoTabDropPositionsAcrossTheWholeBar() {
+        let remaining = URL(fileURLWithPath: "/tmp/notes.tex")
+        let frames = [remaining: CGRect(x: 0, y: 0, width: 100, height: 34)]
+
+        #expect(
+            editorTabDropIndicator(
+                locationX: 20,
+                orderedDocumentIDs: [remaining],
+                frames: frames
+            ) == EditorTabDropIndicator(targetDocumentID: remaining, placement: .before)
+        )
+        #expect(
+            editorTabDropIndicator(
+                locationX: 400,
+                orderedDocumentIDs: [remaining],
+                frames: frames
+            ) == EditorTabDropIndicator(targetDocumentID: remaining, placement: .after)
+        )
+    }
+
+    @Test
     func compilesMinimalLatexProject() async throws {
         #expect(try await latexBuildProducesPDF())
     }
@@ -72,7 +140,8 @@ struct LighTexTests {
             autoCloseBrackets: true,
             jumpLine: nil,
             jumpToken: 0,
-            onCursorChange: { _, _ in }
+            onCursorChange: { _, _ in },
+            onWordDoubleClick: { _, _ in }
         )
         let host = NSHostingView(rootView: editor)
         host.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
@@ -86,6 +155,147 @@ struct LighTexTests {
         #expect((textView?.frame.width ?? 0) > 0)
         #expect((textView?.frame.height ?? 0) > 0)
         #expect(textView?.appearance?.name == .aqua)
+        #expect(textView?.textContainerInset.width == 6)
+        #expect(textView?.textContainerInset.height == 8)
+        #expect(textView?.textContainer?.lineFragmentPadding == 0)
+        let paragraphStyle = textView?.textStorage?.attribute(
+            .paragraphStyle,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let expectedLineHeight = editorLineHeight(for: textView!.editorFont)
+        #expect(paragraphStyle?.minimumLineHeight == expectedLineHeight)
+        #expect(paragraphStyle?.maximumLineHeight == expectedLineHeight)
+        #expect(paragraphStyle?.lineHeightMultiple == 1)
+        let typingParagraph = textView?.typingAttributes[.paragraphStyle] as? NSParagraphStyle
+        #expect(typingParagraph?.minimumLineHeight == expectedLineHeight)
+        #expect(typingParagraph?.maximumLineHeight == expectedLineHeight)
+        #expect(
+            textView?.layoutManager?.temporaryAttribute(
+                .backgroundColor,
+                atCharacterIndex: 0,
+                effectiveRange: nil
+            ) == nil
+        )
+    }
+
+    @Test @MainActor
+    func typingIntoBlankLineKeepsItsLineFragmentStable() async throws {
+        let source = "first\n\nthird"
+        let text = EditorTextBox(source)
+        let editor = SourceEditor(
+            text: Binding(
+                get: { text.value },
+                set: { text.value = $0 }
+            ),
+            fontSize: 13.5,
+            tabWidth: 4,
+            showsLineNumbers: true,
+            wordWrap: false,
+            autoCloseBrackets: true,
+            jumpLine: nil,
+            jumpToken: 0,
+            onCursorChange: { _, _ in },
+            onWordDoubleClick: { _, _ in }
+        )
+        let host = NSHostingView(rootView: editor)
+        host.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
+        host.layoutSubtreeIfNeeded()
+        await Task.yield()
+        host.layoutSubtreeIfNeeded()
+
+        let textView = try #require(findCodeTextView(in: host))
+        let scrollView = try #require(textView.enclosingScrollView)
+        let before = try lineFragmentRect(in: textView, atCharacter: 6)
+        let scrollOrigin = scrollView.contentView.bounds.origin
+
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+        textView.insertText("efve", replacementRange: textView.selectedRange())
+        textView.layoutManager?.ensureLayout(for: try #require(textView.textContainer))
+
+        let after = try lineFragmentRect(in: textView, atCharacter: 6)
+        let insertedParagraph = textView.textStorage?.attribute(
+            .paragraphStyle,
+            at: 6,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+
+        #expect(textView.string == "first\nefve\nthird")
+        #expect(after.minY == before.minY)
+        #expect(after.height == before.height)
+        #expect(scrollView.contentView.bounds.origin == scrollOrigin)
+        #expect(insertedParagraph?.minimumLineHeight == textView.editorLineHeight)
+        #expect(insertedParagraph?.maximumLineHeight == textView.editorLineHeight)
+    }
+
+    @Test @MainActor
+    func completesLatexEnvironmentAfterNativePreviewOnReturn() {
+        let textView = CodeTextView()
+        textView.editorTabWidth = 4
+        textView.string = "  \\begin{eq}"
+        textView.setSelectedRange(NSRange(
+            location: ("  \\begin{eq" as NSString).length,
+            length: 0
+        ))
+
+        let context = latexEnvironmentCompletionContext(
+            in: textView.string,
+            selection: textView.selectedRange()
+        )
+        #expect(context?.query == "eq")
+        #expect(context?.replacementRange.length == 3)
+        #expect(latexEnvironmentCompletions(for: "eq") == ["equation", "equation*"])
+
+        textView.insertCompletion(
+            "equation",
+            forPartialWordRange: context!.partialRange,
+            movement: NSTextMovement.return.rawValue,
+            isFinal: false
+        )
+        #expect(textView.string == "  \\begin{eq}")
+
+        textView.insertCompletion(
+            "equation",
+            forPartialWordRange: context!.partialRange,
+            movement: NSTextMovement.return.rawValue,
+            isFinal: true
+        )
+
+        #expect(
+            textView.string
+                == "  \\begin{equation}\n      \n  \\end{equation}"
+        )
+        #expect(
+            textView.selectedRange().location
+                == ("  \\begin{equation}\n      " as NSString).length
+        )
+    }
+
+    @Test
+    func numbersTheTrailingEmptySourceLine() {
+        let source = "first\nsecond\n" as NSString
+
+        #expect(sourceLineNumber(atUTF16Location: 0, in: source) == 1)
+        #expect(sourceLineNumber(atUTF16Location: 6, in: source) == 2)
+        #expect(sourceLineNumber(atUTF16Location: source.length, in: source) == 3)
+    }
+
+    @Test
+    func usesOneFixedEditorLineMetric() {
+        let font = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+        let lineHeight = editorLineHeight(for: font)
+        let paragraph = editorParagraphStyle(font: font, tabWidth: 4)
+
+        #expect(lineHeight == 18)
+        #expect(paragraph.minimumLineHeight == lineHeight)
+        #expect(paragraph.maximumLineHeight == lineHeight)
+        #expect(paragraph.lineHeightMultiple == 1)
+        #expect(
+            lineNumberOriginY(
+                sourceBaselineY: editorBaselineOffset(font: font, lineHeight: lineHeight),
+                numberFontAscender: 8
+            ) == editorBaselineOffset(font: font, lineHeight: lineHeight) - 8
+        )
     }
 
     @Test @MainActor
@@ -405,6 +615,60 @@ struct LighTexTests {
         model.closeProject()
         #expect(model.hasProject == false)
         #expect(model.recentProjects.map(\.name) == ["EmptyBook"])
+
+        model.clearRecentProjects()
+        #expect(model.recentProjects.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: mainFile.path))
+    }
+
+    @Test @MainActor
+    func createsProjectItemsAndReordersEditorTabs() throws {
+        let testDefaults = makeIsolatedDefaults()
+        let settings = AppSettings(defaults: testDefaults)
+        settings.automaticBuilds = false
+        let model = AppModel(settings: settings, defaults: testDefaults)
+        let location = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: location, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: location) }
+
+        #expect(model.createProject(name: "Workspace", location: location))
+        let root = location.appendingPathComponent("Workspace", isDirectory: true)
+        let folder = root.appendingPathComponent("sections", isDirectory: true)
+        #expect(model.createProjectFolder(named: "sections"))
+        #expect(model.projectTree.contains(where: { $0.url == folder && $0.isDirectory }))
+
+        model.navigatorSelection = folder
+        #expect(model.createProjectFile(named: "vectors.tex"))
+        let vectors = folder.appendingPathComponent("vectors.tex")
+        #expect(FileManager.default.fileExists(atPath: vectors.path))
+        #expect(model.selectedDocumentID == vectors)
+
+        let main = root.appendingPathComponent("main.tex")
+        model.navigatorSelection = nil
+        #expect(model.createProjectFile(named: "notes.tex"))
+        let notes = root.appendingPathComponent("notes.tex")
+        #expect(model.openDocuments.map(\.url) == [main, vectors, notes])
+
+        model.moveDocument(main, relativeTo: notes, placement: .after)
+        #expect(model.openDocuments.map(\.url) == [vectors, notes, main])
+        model.moveDocument(main, relativeTo: vectors, placement: .before)
+        #expect(model.openDocuments.map(\.url) == [main, vectors, notes])
+        model.moveDocument(vectors, relativeTo: notes, placement: .after)
+        #expect(model.openDocuments.map(\.url) == [main, notes, vectors])
+
+        model.closeDocument(notes)
+        #expect(model.openDocuments.map(\.url) == [main, vectors])
+        model.moveDocument(main, relativeTo: vectors, placement: .after)
+        #expect(model.openDocuments.map(\.url) == [vectors, main])
+        model.moveDocument(main, relativeTo: vectors, placement: .before)
+        #expect(model.openDocuments.map(\.url) == [main, vectors])
+
+        #expect(model.openDroppedProjectItem(atPath: notes.path))
+        #expect(model.selectedDocumentID == notes)
+        #expect(model.openDocuments.map(\.url) == [main, vectors, notes])
+        #expect(AppModel.validProjectItemName("../bad") == nil)
+        #expect(AppModel.validProjectItemName(" chapter.tex ") == "chapter.tex")
     }
 }
 
@@ -435,4 +699,22 @@ private func findCodeTextView(in view: NSView) -> CodeTextView? {
         }
     }
     return nil
+}
+
+@MainActor
+private func lineFragmentRect(
+    in textView: CodeTextView,
+    atCharacter characterIndex: Int
+) throws -> NSRect {
+    let layoutManager = try #require(textView.layoutManager)
+    let textContainer = try #require(textView.textContainer)
+    layoutManager.ensureLayout(for: textContainer)
+    let glyphRange = layoutManager.glyphRange(
+        forCharacterRange: NSRange(location: characterIndex, length: 1),
+        actualCharacterRange: nil
+    )
+    return layoutManager.lineFragmentRect(
+        forGlyphAt: glyphRange.location,
+        effectiveRange: nil
+    )
 }

@@ -15,7 +15,7 @@ This file is the visual source of truth for the native macOS application.
 - Welcome title: 28 pt Semibold.
 - Standard UI: 12–14 pt.
 - Secondary and status text: 11–12 pt.
-- Source editor: SF Mono when available, platform monospace fallback, 13.5 pt default, 1.46 line-height multiple.
+- Source editor: SF Mono when available, platform monospace fallback, 13.5 pt default, compact fixed 18 pt line height at the default size.
 - Do not bundle web fonts.
 
 ## Color and surfaces
@@ -38,6 +38,8 @@ This file is the visual source of truth for the native macOS application.
 - Editor minimum: 360 pt.
 - PDF minimum: 320 pt; user can hide it when width is constrained.
 - Panels are separated by draggable native split dividers, not cards.
+- Source text uses a compact 6 pt horizontal and 8 pt vertical inset from its gutter, matching dense web-based code editors.
+- Empty and populated source lines share one fixed TextKit line height and baseline; syntax highlighting never changes typography while editing.
 
 ## Components
 
@@ -51,6 +53,7 @@ This file is the visual source of truth for the native macOS application.
 - The sidebar starts directly with the file tree and uses a lower resizable Outline pane for document headings.
 - Recompile is the primary toolbar action; Auto Compile is a secondary toggle beside it.
 - Problems panel stays collapsed until requested or a build fails.
+- Clearing Recent Projects always requires confirmation and states that project folders and files remain on the Mac.
 
 ## Motion
 

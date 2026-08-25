@@ -1,6 +1,29 @@
 import AppKit
 import SwiftUI
 
+let editorBaseTextColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+
+func editorLineHeight(for font: NSFont) -> CGFloat {
+    ceil(font.pointSize * 4 / 3)
+}
+
+func editorParagraphStyle(font: NSFont, tabWidth: Int) -> NSParagraphStyle {
+    let paragraph = NSMutableParagraphStyle()
+    let lineHeight = editorLineHeight(for: font)
+    paragraph.minimumLineHeight = lineHeight
+    paragraph.maximumLineHeight = lineHeight
+    paragraph.lineHeightMultiple = 1
+    paragraph.tabStops = []
+    paragraph.defaultTabInterval = font.maximumAdvancement.width * CGFloat(max(1, tabWidth))
+    return paragraph.copy() as! NSParagraphStyle
+}
+
+func editorBaselineOffset(font: NSFont, lineHeight: CGFloat) -> CGFloat {
+    let fontHeight = font.ascender - font.descender + font.leading
+    let topLeading = max(0, (lineHeight - fontHeight) / 2)
+    return topLeading + font.ascender
+}
+
 struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
     let fontSize: Double
@@ -11,6 +34,7 @@ struct SourceEditor: NSViewRepresentable {
     let jumpLine: Int?
     let jumpToken: Int
     let onCursorChange: (Int, Int) -> Void
+    let onWordDoubleClick: (Int, Int) -> Void
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -55,12 +79,20 @@ struct SourceEditor: NSViewRepresentable {
         func applySyntaxHighlighting(to textView: CodeTextView) {
             guard let textStorage = textView.textStorage else { return }
             isApplyingUpdate = true
-            SyntaxHighlighter.apply(
+            SyntaxHighlighter.applyColors(to: textStorage)
+            textView.refreshTypingAttributes()
+            isApplyingUpdate = false
+        }
+
+        func applyTypography(to textView: CodeTextView) {
+            guard let textStorage = textView.textStorage else { return }
+            isApplyingUpdate = true
+            SyntaxHighlighter.applyTypography(
                 to: textStorage,
                 font: textView.editorFont,
-                lineHeightMultiple: 1.46,
-                tabWidth: textView.editorTabWidth
+                paragraphStyle: textView.editorParagraphStyle
             )
+            textView.refreshTypingAttributes()
             isApplyingUpdate = false
         }
 
@@ -78,23 +110,13 @@ struct SourceEditor: NSViewRepresentable {
                 lastCursorColumn = safeColumn
                 parent.onCursorChange(line, safeColumn)
             }
-            applyStructuralHighlights(to: textView)
+            applyBracketHighlights(to: textView)
         }
 
-        func applyStructuralHighlights(to textView: CodeTextView) {
+        func applyBracketHighlights(to textView: CodeTextView) {
             guard let layoutManager = textView.layoutManager else { return }
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
-
-            let lineRange = (textView.string as NSString).lineRange(for: NSRange(
-                location: min(textView.selectedRange().location, fullRange.length),
-                length: 0
-            ))
-            layoutManager.addTemporaryAttribute(
-                .backgroundColor,
-                value: NSColor.selectedContentBackgroundColor.withAlphaComponent(0.055),
-                forCharacterRange: lineRange
-            )
 
             for range in matchingBracketRanges(in: textView.string, cursor: textView.selectedRange().location) {
                 layoutManager.addTemporaryAttribute(
@@ -103,6 +125,10 @@ struct SourceEditor: NSViewRepresentable {
                     forCharacterRange: range
                 )
             }
+        }
+
+        func wordDoubleClicked(line: Int, column: Int) {
+            parent.onWordDoubleClick(line, column)
         }
 
         func jumpIfNeeded(in textView: CodeTextView) {
@@ -179,6 +205,9 @@ struct SourceEditor: NSViewRepresentable {
 
         textView.appearance = NSAppearance(named: .aqua)
         textView.delegate = context.coordinator
+        textView.onWordDoubleClick = { [weak coordinator = context.coordinator] line, column in
+            coordinator?.wordDoubleClicked(line: line, column: column)
+        }
         configure(textView)
         textView.string = text
         textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -190,6 +219,8 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .white
+        scrollView.wantsLayer = true
+        scrollView.layer?.masksToBounds = true
         scrollView.contentView.postsBoundsChangedNotifications = true
 
         let ruler = LineNumberRulerView(textView: textView, scrollView: scrollView)
@@ -207,6 +238,7 @@ struct SourceEditor: NSViewRepresentable {
             object: scrollView.contentView
         )
 
+        context.coordinator.applyTypography(to: textView)
         context.coordinator.applySyntaxHighlighting(to: textView)
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastTabWidth = tabWidth
@@ -250,11 +282,11 @@ struct SourceEditor: NSViewRepresentable {
                 location: min(selection.location, length),
                 length: min(selection.length, max(0, length - min(selection.location, length)))
             ))
+            context.coordinator.applyTypography(to: textView)
             context.coordinator.applySyntaxHighlighting(to: textView)
             context.coordinator.isApplyingUpdate = false
-        }
-
-        if typographyChanged {
+        } else if typographyChanged {
+            context.coordinator.applyTypography(to: textView)
             context.coordinator.applySyntaxHighlighting(to: textView)
         }
 
@@ -273,14 +305,22 @@ struct SourceEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.usesFindPanel = true
         textView.isIncrementalSearchingEnabled = true
-        textView.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        textView.textColor = editorBaseTextColor
         textView.backgroundColor = .white
         textView.insertionPointColor = NSColor(calibratedWhite: 0.12, alpha: 1)
-        textView.textContainerInset = NSSize(width: 14, height: 16)
+        textView.textContainerInset = NSSize(width: 6, height: 8)
+        textView.textContainer?.lineFragmentPadding = 0
         textView.editorFont = NSFont(name: "SFMono-Regular", size: fontSize)
             ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        textView.font = textView.editorFont
         textView.editorTabWidth = max(1, tabWidth)
+        textView.editorLineHeight = editorLineHeight(for: textView.editorFont)
+        textView.editorParagraphStyle = editorParagraphStyle(
+            font: textView.editorFont,
+            tabWidth: textView.editorTabWidth
+        )
+        textView.font = textView.editorFont
+        textView.defaultParagraphStyle = textView.editorParagraphStyle
+        textView.refreshTypingAttributes()
         textView.closesBracketsAutomatically = autoCloseBrackets
         textView.isVerticallyResizable = true
 
@@ -308,7 +348,18 @@ final class CodeTextView: NSTextView {
     var editorTabWidth = 4
     var closesBracketsAutomatically = true
     var editorFont = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+    var editorLineHeight: CGFloat = 18
+    var editorParagraphStyle: NSParagraphStyle = .default
     var opensAtDocumentStart = false
+    var onWordDoubleClick: ((Int, Int) -> Void)?
+
+    func refreshTypingAttributes() {
+        typingAttributes = [
+            .font: editorFont,
+            .foregroundColor: editorBaseTextColor,
+            .paragraphStyle: editorParagraphStyle
+        ]
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -328,16 +379,112 @@ final class CodeTextView: NSTextView {
     }
 
     override func insertTab(_ sender: Any?) {
+        if acceptLatexEnvironmentCompletion() {
+            return
+        }
         insertText(String(repeating: " ", count: editorTabWidth), replacementRange: selectedRange())
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if acceptLatexEnvironmentCompletion() {
+            return
+        }
+        super.insertNewline(sender)
+    }
+
+    override var rangeForUserCompletion: NSRange {
+        latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        )?.partialRange ?? NSRange(location: NSNotFound, length: 0)
+    }
+
+    override func completions(
+        forPartialWordRange charRange: NSRange,
+        indexOfSelectedItem index: UnsafeMutablePointer<Int>
+    ) -> [String]? {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ) else {
+            return nil
+        }
+        index.pointee = 0
+        return latexEnvironmentCompletions(for: context.query)
+    }
+
+    override func insertCompletion(
+        _ word: String,
+        forPartialWordRange charRange: NSRange,
+        movement: Int,
+        isFinal flag: Bool
+    ) {
+        guard latexEnvironmentNames.contains(word) else {
+            super.insertCompletion(
+                word,
+                forPartialWordRange: charRange,
+                movement: movement,
+                isFinal: flag
+            )
+            return
+        }
+
+        // AppKit normally previews the highlighted completion by replacing the
+        // partial word. Keeping the source unchanged until confirmation lets us
+        // expand the whole LaTeX environment atomically on Return or Tab.
+        guard flag else { return }
+        guard movement != NSTextMovement.cancel.rawValue else { return }
+        if insertLatexEnvironment(word) {
+            return
+        }
+        super.insertCompletion(
+            word,
+            forPartialWordRange: charRange,
+            movement: movement,
+            isFinal: flag
+        )
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard event.clickCount == 2 else { return }
+
+        let selection = selectedRange()
+        let text = string as NSString
+        guard selection.length > 0,
+              NSMaxRange(selection) <= text.length,
+              !text.substring(with: selection).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        let location = min(selection.location, text.length)
+        let prefix = text.substring(to: location)
+        let line = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        let column: Int
+        if let newline = prefix.lastIndex(of: "\n") {
+            column = prefix.distance(from: newline, to: prefix.endIndex)
+        } else {
+            column = location + 1
+        }
+        onWordDoubleClick?(line, max(1, column))
     }
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard closesBracketsAutomatically,
-              modifiers.isEmpty,
+        guard modifiers.isEmpty,
               let characters = event.characters,
               characters.count == 1 else {
             super.keyDown(with: event)
+            return
+        }
+
+        let completionCharacter = characters.first.map {
+            $0.isLetter || $0.isNumber || $0 == "*"
+        } ?? false
+
+        guard closesBracketsAutomatically else {
+            super.keyDown(with: event)
+            requestLatexCompletionIfNeeded(afterTyping: completionCharacter)
             return
         }
 
@@ -372,29 +519,163 @@ final class CodeTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+        requestLatexCompletionIfNeeded(afterTyping: completionCharacter)
+    }
+
+    private func requestLatexCompletionIfNeeded(afterTyping eligibleCharacter: Bool) {
+        guard eligibleCharacter else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  let context = latexEnvironmentCompletionContext(
+                    in: self.string,
+                    selection: self.selectedRange()
+                  ),
+                  !context.query.isEmpty,
+                  !latexEnvironmentCompletions(for: context.query).isEmpty else {
+                return
+            }
+            self.complete(nil)
+        }
+    }
+
+    private func acceptLatexEnvironmentCompletion() -> Bool {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ),
+        !context.query.isEmpty,
+        let environment = latexEnvironmentCompletions(for: context.query).first else {
+            return false
+        }
+        return insertLatexEnvironment(environment)
+    }
+
+    private func insertLatexEnvironment(_ environment: String) -> Bool {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ) else {
+            return false
+        }
+        let innerIndent = String(repeating: " ", count: max(1, editorTabWidth))
+        let replacement = "\(environment)}\n\(context.lineIndent)\(innerIndent)\n\(context.lineIndent)\\end{\(environment)}"
+        insertText(replacement, replacementRange: context.replacementRange)
+        let cursorOffset = (environment as NSString).length
+            + 2
+            + (context.lineIndent as NSString).length
+            + (innerIndent as NSString).length
+        setSelectedRange(NSRange(
+            location: context.replacementRange.location + cursorOffset,
+            length: 0
+        ))
+        scrollRangeToVisible(selectedRange())
+        return true
     }
 }
 
+struct LatexEnvironmentCompletionContext: Equatable {
+    let partialRange: NSRange
+    let replacementRange: NSRange
+    let query: String
+    let lineIndent: String
+}
+
+let latexEnvironmentNames = [
+    "equation", "equation*", "align", "align*", "gather", "gather*",
+    "multline", "multline*", "cases", "matrix", "pmatrix", "bmatrix",
+    "theorem", "proof", "definition", "example", "itemize", "enumerate",
+    "figure", "table", "center"
+]
+
+func latexEnvironmentCompletions(for query: String) -> [String] {
+    let normalized = query.lowercased()
+    return latexEnvironmentNames.filter { $0.lowercased().hasPrefix(normalized) }
+}
+
+func latexEnvironmentCompletionContext(
+    in text: String,
+    selection: NSRange
+) -> LatexEnvironmentCompletionContext? {
+    guard selection.length == 0 else { return nil }
+    let source = text as NSString
+    guard selection.location <= source.length else { return nil }
+
+    let lineRange = source.lineRange(for: NSRange(location: selection.location, length: 0))
+    let prefixRange = NSRange(
+        location: lineRange.location,
+        length: selection.location - lineRange.location
+    )
+    let linePrefix = source.substring(with: prefixRange) as NSString
+    guard let expression = try? NSRegularExpression(pattern: #"\\begin\{([A-Za-z*]*)$"#),
+          let match = expression.firstMatch(
+            in: linePrefix as String,
+            range: NSRange(location: 0, length: linePrefix.length)
+          ),
+          match.numberOfRanges == 2 else {
+        return nil
+    }
+
+    let queryRangeInLine = match.range(at: 1)
+    let partialRange = NSRange(
+        location: lineRange.location + queryRangeInLine.location,
+        length: queryRangeInLine.length
+    )
+    let hasClosingBrace = selection.location < source.length
+        && source.substring(with: NSRange(location: selection.location, length: 1)) == "}"
+    let replacementRange = NSRange(
+        location: partialRange.location,
+        length: partialRange.length + (hasClosingBrace ? 1 : 0)
+    )
+
+    let leadingWhitespace = try? NSRegularExpression(pattern: #"^[\t ]*"#)
+        .firstMatch(
+            in: linePrefix as String,
+            range: NSRange(location: 0, length: linePrefix.length)
+        )?.range
+    let lineIndent = leadingWhitespace.map { linePrefix.substring(with: $0) } ?? ""
+
+    return LatexEnvironmentCompletionContext(
+        partialRange: partialRange,
+        replacementRange: replacementRange,
+        query: source.substring(with: partialRange),
+        lineIndent: lineIndent
+    )
+}
+
+func sourceLineNumber(atUTF16Location location: Int, in text: NSString) -> Int {
+    let safeLocation = min(max(0, location), text.length)
+    guard safeLocation > 0 else { return 1 }
+    let prefix = text.substring(to: safeLocation)
+    return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+}
+
+func lineNumberOriginY(sourceBaselineY: CGFloat, numberFontAscender: CGFloat) -> CGFloat {
+    sourceBaselineY - numberFontAscender
+}
+
 private enum SyntaxHighlighter {
-    static func apply(
+    static func applyTypography(
         to storage: NSTextStorage,
         font: NSFont,
-        lineHeightMultiple: CGFloat,
-        tabWidth: Int
+        paragraphStyle: NSParagraphStyle
     ) {
         let fullRange = NSRange(location: 0, length: storage.length)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = lineHeightMultiple
-        paragraph.tabStops = []
-        paragraph.defaultTabInterval = font.maximumAdvancement.width * CGFloat(max(1, tabWidth))
+        guard fullRange.length > 0 else { return }
 
         storage.beginEditing()
-        storage.setAttributes([
+        storage.addAttributes([
             .font: font,
-            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1),
-            .paragraphStyle: paragraph
+            .paragraphStyle: paragraphStyle
         ], range: fullRange)
+        storage.endEditing()
+    }
 
+    static func applyColors(to storage: NSTextStorage) {
+        let fullRange = NSRange(location: 0, length: storage.length)
+        guard fullRange.length > 0 else { return }
+
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: editorBaseTextColor, range: fullRange)
         apply(#"%.*$"#, color: .secondaryLabelColor, options: [.anchorsMatchLines], to: storage)
         apply(#"\\[A-Za-z@]+\*?"#, color: NSColor.systemBlue.withAlphaComponent(0.88), to: storage)
         apply(#"\$[^$\n]+\$"#, color: NSColor.systemPurple.withAlphaComponent(0.76), to: storage)
@@ -419,13 +700,13 @@ private enum SyntaxHighlighter {
 }
 
 final class LineNumberRulerView: NSRulerView {
-    weak var textView: NSTextView?
+    weak var textView: CodeTextView?
 
-    init(textView: NSTextView, scrollView: NSScrollView) {
+    init(textView: CodeTextView, scrollView: NSScrollView) {
         self.textView = textView
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
-        ruleThickness = 44
+        ruleThickness = 40
     }
 
     required init(coder: NSCoder) {
@@ -464,13 +745,20 @@ final class LineNumberRulerView: NSRulerView {
         )
         let string = textView.string as NSString
         guard string.length > 0 else {
-            drawLineNumber(1, y: textView.textContainerInset.height - visibleRect.minY)
+            drawLineNumber(
+                1,
+                sourceBaselineY: textView.textContainerInset.height
+                    - visibleRect.minY
+                    + editorBaselineOffset(
+                        font: textView.editorFont,
+                        lineHeight: textView.editorLineHeight
+                    )
+            )
             return
         }
 
         let safeStart = min(characterRange.location, string.length)
-        let prefix = string.substring(to: safeStart)
-        var lineNumber = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        var lineNumber = sourceLineNumber(atUTF16Location: safeStart, in: string)
         var location = safeStart
         let limit = min(NSMaxRange(characterRange), string.length)
 
@@ -480,27 +768,58 @@ final class LineNumberRulerView: NSRulerView {
                 forCharacterRange: lineRange,
                 actualCharacterRange: nil
             )
-            var lineRect = layoutManager.boundingRect(forGlyphRange: lineGlyphRange, in: textContainer)
+            guard lineGlyphRange.length > 0 else { break }
+            var lineRect = layoutManager.lineFragmentRect(
+                forGlyphAt: lineGlyphRange.location,
+                effectiveRange: nil
+            )
             lineRect.origin.y += textView.textContainerInset.height
-            let y = lineRect.minY - visibleRect.minY
-            drawLineNumber(lineNumber, y: y)
+            let baselineY = lineRect.minY
+                - visibleRect.minY
+                + editorBaselineOffset(
+                    font: textView.editorFont,
+                    lineHeight: textView.editorLineHeight
+                )
+            drawLineNumber(lineNumber, sourceBaselineY: baselineY)
 
             let next = NSMaxRange(lineRange)
             if next <= location || next >= string.length { break }
             location = next
             lineNumber += 1
         }
+
+        if string.character(at: string.length - 1) == 10,
+           layoutManager.extraLineFragmentTextContainer === textContainer {
+            var trailingRect = layoutManager.extraLineFragmentRect
+            trailingRect.origin.y += textView.textContainerInset.height
+            let y = trailingRect.minY - visibleRect.minY
+            if trailingRect.maxY >= visibleRect.minY,
+               trailingRect.minY <= visibleRect.maxY {
+                drawLineNumber(
+                    sourceLineNumber(atUTF16Location: string.length, in: string),
+                    sourceBaselineY: y + editorBaselineOffset(
+                        font: textView.editorFont,
+                        lineHeight: textView.editorLineHeight
+                    )
+                )
+            }
+        }
     }
 
-    private func drawLineNumber(_ number: Int, y: CGFloat) {
+    private func drawLineNumber(_ number: Int, sourceBaselineY: CGFloat) {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .regular),
+            .font: font,
             .foregroundColor: NSColor.tertiaryLabelColor
         ]
         let text = "\(number)" as NSString
         let size = text.size(withAttributes: attributes)
+        let originY = lineNumberOriginY(
+            sourceBaselineY: sourceBaselineY,
+            numberFontAscender: font.ascender
+        )
         text.draw(
-            at: NSPoint(x: ruleThickness - size.width - 9, y: y),
+            at: NSPoint(x: ruleThickness - size.width - 8, y: originY),
             withAttributes: attributes
         )
     }

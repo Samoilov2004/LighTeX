@@ -4,6 +4,7 @@ enum SyncTeXService {
     static func target(
         forSource sourceURL: URL,
         line: Int,
+        column: Int = 1,
         previewPDFURL: URL,
         projectURL: URL,
         executableURL: URL?
@@ -13,6 +14,7 @@ enum SyncTeXService {
             resolveTarget(
                 forSource: sourceURL,
                 line: line,
+                column: column,
                 previewPDFURL: previewPDFURL,
                 projectURL: projectURL,
                 executableURL: executableURL
@@ -23,6 +25,7 @@ enum SyncTeXService {
     private static func resolveTarget(
         forSource sourceURL: URL,
         line: Int,
+        column: Int,
         previewPDFURL: URL,
         projectURL: URL,
         executableURL: URL
@@ -32,7 +35,7 @@ enum SyncTeXService {
         process.executableURL = executableURL
         process.arguments = [
             "view",
-            "-i", "\(max(1, line)):1:\(sourceURL.path)",
+            "-i", sourcePositionArgument(sourceURL: sourceURL, line: line, column: column),
             "-o", previewPDFURL.path
         ]
         process.currentDirectoryURL = projectURL
@@ -54,6 +57,10 @@ enum SyncTeXService {
         }
 
         return target(from: output)
+    }
+
+    static func sourcePositionArgument(sourceURL: URL, line: Int, column: Int) -> String {
+        "\(max(1, line)):\(max(1, column)):\(sourceURL.path)"
     }
 
     static func target(from output: String) -> PDFJumpTarget? {

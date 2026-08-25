@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 struct ProjectItem: Identifiable, Hashable {
     let url: URL
@@ -21,7 +22,19 @@ struct ProjectItem: Identifiable, Hashable {
     }
 
     var isEditableText: Bool {
-        ["tex", "bib", "sty", "cls", "txt"].contains(url.pathExtension.lowercased())
+        let pathExtension = url.pathExtension.lowercased()
+        let knownTextExtensions: Set<String> = [
+            "tex", "bib", "sty", "cls", "txt", "md", "markdown",
+            "json", "yaml", "yml", "toml", "csv", "tsv", "xml",
+            "html", "css", "js", "ts", "py", "rb", "sh", "lua"
+        ]
+        if knownTextExtensions.contains(pathExtension) {
+            return true
+        }
+        if pathExtension.isEmpty {
+            return ["Makefile", "Dockerfile"].contains(name)
+        }
+        return UTType(filenameExtension: pathExtension)?.conforms(to: .text) == true
     }
 }
 
@@ -29,10 +42,6 @@ enum ProjectScanner {
     private static let ignoredDirectories: Set<String> = [
         ".git", ".build", "build", "node_modules", "DerivedData", ".idea"
     ]
-    private static let visibleExtensions: Set<String> = [
-        "tex", "bib", "sty", "cls", "txt", "pdf", "png", "jpg", "jpeg", "svg", "eps"
-    ]
-
     static func projectTree(in projectURL: URL) -> [ProjectItem] {
         children(of: projectURL)
     }
@@ -83,17 +92,13 @@ enum ProjectScanner {
             if values.isDirectory == true {
                 guard !ignoredDirectories.contains(url.lastPathComponent) else { return nil }
                 let nested = children(of: url)
-                return nested.isEmpty ? nil : ProjectItem(
+                return ProjectItem(
                     url: url,
                     isDirectory: true,
                     children: nested
                 )
             }
-
-            guard values.isRegularFile == true,
-                  visibleExtensions.contains(url.pathExtension.lowercased()) else {
-                return nil
-            }
+            guard values.isRegularFile == true else { return nil }
             return ProjectItem(url: url, isDirectory: false, children: nil)
         }
         .sorted { lhs, rhs in
