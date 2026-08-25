@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 struct ProjectItem: Identifiable, Hashable {
     let url: URL
@@ -21,7 +22,19 @@ struct ProjectItem: Identifiable, Hashable {
     }
 
     var isEditableText: Bool {
-        ["tex", "bib", "sty", "cls", "txt"].contains(url.pathExtension.lowercased())
+        let pathExtension = url.pathExtension.lowercased()
+        let knownTextExtensions: Set<String> = [
+            "tex", "bib", "sty", "cls", "txt", "md", "markdown",
+            "json", "yaml", "yml", "toml", "csv", "tsv", "xml",
+            "html", "css", "js", "ts", "py", "rb", "sh", "lua"
+        ]
+        if knownTextExtensions.contains(pathExtension) {
+            return true
+        }
+        if pathExtension.isEmpty {
+            return ["Makefile", "Dockerfile"].contains(name)
+        }
+        return UTType(filenameExtension: pathExtension)?.conforms(to: .text) == true
     }
 }
 

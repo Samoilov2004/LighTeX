@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
@@ -735,6 +734,17 @@ private struct ProjectFileTreeRow: View {
             row
                 .onDrag {
                     NSItemProvider(object: item.url as NSURL)
+                } preview: {
+                    HStack(spacing: 6) {
+                        Image(systemName: item.iconName)
+                            .foregroundStyle(.secondary)
+                        Text(item.name)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 12.5, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .help("Drag to the tab bar to open \(item.name)")
         }
@@ -884,7 +894,6 @@ private struct EditorTabBar: View {
     @EnvironmentObject private var model: AppModel
     @State private var draggedDocumentID: URL?
     @State private var dropIndicator: EditorTabDropIndicator?
-    @State private var fileDropTargetID: URL?
     @State private var isFileDropTarget = false
     @State private var tabsContentWidth: CGFloat = 0
     @State private var tabFrames: [URL: CGRect] = [:]
@@ -909,8 +918,7 @@ private struct EditorTabBar: View {
                                     showsTrailingSeparator: !isActive
                                         && !nextIsActive
                                         && index < visibleDocuments.count - 1,
-                                    dropIndicator: $dropIndicator,
-                                    fileDropTargetID: $fileDropTargetID
+                                    dropIndicator: $dropIndicator
                                 )
                             }
                         }
@@ -924,15 +932,18 @@ private struct EditorTabBar: View {
                             }
                         }
 
-                        Rectangle()
-                            .fill(
-                                isFileDropTarget
-                                    ? Color.accentColor.opacity(0.07)
-                                    : LighTexTheme.secondaryBackground
-                            )
+                        ProjectFileDropReceiver(
+                            onDrop: openFirstDroppedProjectFile,
+                            onTargeted: { isFileDropTarget = $0 }
+                        )
                             .frame(
                                 width: max(44, geometry.size.width - tabsContentWidth),
                                 height: 34
+                            )
+                            .background(
+                                isFileDropTarget
+                                    ? Color.accentColor.opacity(0.07)
+                                    : LighTexTheme.secondaryBackground
                             )
                     }
                     .frame(
@@ -987,13 +998,11 @@ private struct EditorTabBar: View {
                 : LighTexTheme.secondaryBackground
         )
         .contentShape(Rectangle())
-        .onDrop(
-            of: [.fileURL],
-            delegate: EditorTabBarDropDelegate(
-                isFileDropTarget: $isFileDropTarget,
-                model: model
-            )
-        )
+        .dropDestination(for: URL.self) { urls, _ in
+            return openFirstDroppedProjectFile(urls)
+        } isTargeted: { isTargeted in
+            isFileDropTarget = isTargeted
+        }
         .accessibilityLabel("Open editor tabs")
         .task(id: draggedDocumentID) {
             guard draggedDocumentID != nil else { return }
@@ -1055,6 +1064,11 @@ private struct EditorTabBar: View {
         draggedTabWidth = 0
         dropIndicator = nil
     }
+
+    private func openFirstDroppedProjectFile(_ urls: [URL]) -> Bool {
+        guard let url = urls.first(where: \.isFileURL) else { return false }
+        return model.openDroppedProjectItem(atPath: url.path)
+    }
 }
 
 private struct EditorTab: View {
@@ -1063,7 +1077,6 @@ private struct EditorTab: View {
     let isActive: Bool
     let showsTrailingSeparator: Bool
     @Binding var dropIndicator: EditorTabDropIndicator?
-    @Binding var fileDropTargetID: URL?
     @State private var isHovering = false
     @FocusState private var isSelectionFocused: Bool
 
@@ -1167,14 +1180,6 @@ private struct EditorTab: View {
         .focused($isSelectionFocused)
         .focusEffectDisabled()
         .onHover { isHovering = $0 }
-        .onDrop(
-            of: [.fileURL],
-            delegate: EditorTabFileDropDelegate(
-                targetDocumentID: document.id,
-                fileDropTargetID: $fileDropTargetID,
-                model: model
-            )
-        )
         .contextMenu {
             if let index = model.openDocuments.firstIndex(where: { $0.id == document.id }) {
                 Button("Move Tab Left") {
@@ -1207,9 +1212,6 @@ private struct EditorTab: View {
     }
 
     private var tabSurfaceColor: Color {
-        if fileDropTargetID == document.id {
-            return Color.accentColor.opacity(0.09)
-        }
         if isActive {
             return Color.white
         }
@@ -1267,76 +1269,6 @@ private struct EditorTabDragPreview: View {
     }
 }
 
-private struct EditorTabFileDropDelegate: DropDelegate {
-    let targetDocumentID: URL
-    @Binding var fileDropTargetID: URL?
-    let model: AppModel
-
-    func dropEntered(info: DropInfo) {
-        if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
-            fileDropTargetID = targetDocumentID
-        }
-    }
-
-    func dropExited(info: DropInfo) {
-        if fileDropTargetID == targetDocumentID {
-            fileDropTargetID = nil
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        fileDropTargetID = nil
-        return openDroppedProjectItem(from: info, model: model)
-    }
-}
-
-private struct EditorTabBarDropDelegate: DropDelegate {
-    @Binding var isFileDropTarget: Bool
-    let model: AppModel
-
-    func dropEntered(info: DropInfo) {
-        isFileDropTarget = info.hasItemsConforming(to: [UTType.fileURL.identifier])
-    }
-
-    func dropExited(info: DropInfo) {
-        isFileDropTarget = false
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        return DropProposal(operation: .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        defer {
-            isFileDropTarget = false
-        }
-        return openDroppedProjectItem(from: info, model: model)
-    }
-}
-
-private func openDroppedProjectItem(from info: DropInfo, model: AppModel) -> Bool {
-    guard let provider = info.itemProviders(
-        for: [UTType.fileURL.identifier]
-    ).first else {
-        return false
-    }
-
-    provider.loadItem(
-        forTypeIdentifier: UTType.fileURL.identifier,
-        options: nil
-    ) { item, _ in
-        guard let path = droppedFilePath(from: item) else { return }
-        Task { @MainActor in
-            model.openDroppedProjectItem(atPath: path)
-        }
-    }
-    return true
-}
-
 func droppedFilePath(from item: NSSecureCoding?) -> String? {
     if let url = item as? URL {
         return url.path
@@ -1357,6 +1289,79 @@ func droppedFilePath(from item: NSSecureCoding?) -> String? {
         return value
     }
     return nil
+}
+
+private struct ProjectFileDropReceiver: NSViewRepresentable {
+    let onDrop: ([URL]) -> Bool
+    let onTargeted: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ProjectFileDropReceivingView {
+        let view = ProjectFileDropReceivingView()
+        view.onDrop = onDrop
+        view.onTargeted = onTargeted
+        return view
+    }
+
+    func updateNSView(_ nsView: ProjectFileDropReceivingView, context: Context) {
+        nsView.onDrop = onDrop
+        nsView.onTargeted = onTargeted
+    }
+}
+
+@MainActor
+private final class ProjectFileDropReceivingView: NSView {
+    var onDrop: (([URL]) -> Bool)?
+    var onTargeted: ((Bool) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard draggedFileURLs(from: sender) != nil else { return [] }
+        onTargeted?(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggedFileURLs(from: sender) == nil ? [] : .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onTargeted?(false)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { onTargeted?(false) }
+        guard let urls = draggedFileURLs(from: sender) else { return false }
+        return onDrop?(urls) ?? false
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        onTargeted?(false)
+    }
+
+    private func draggedFileURLs(from sender: NSDraggingInfo) -> [URL]? {
+        let urls = projectFileURLs(from: sender.draggingPasteboard)
+        return urls.isEmpty ? nil : urls
+    }
+}
+
+func projectFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+    let options: [NSPasteboard.ReadingOptionKey: Any] = [
+        .urlReadingFileURLsOnly: true
+    ]
+    let objects = pasteboard.readObjects(
+        forClasses: [NSURL.self],
+        options: options
+    ) as? [NSURL] ?? []
+    return objects.map { $0 as URL }.filter(\.isFileURL)
 }
 
 private struct PDFWorkspace: View {

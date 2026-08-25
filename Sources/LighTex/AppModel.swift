@@ -445,12 +445,14 @@ final class AppModel: ObservableObject {
         persistOpenDocuments()
     }
 
-    func openDroppedProjectItem(atPath path: String) {
+    @discardableResult
+    func openDroppedProjectItem(atPath path: String) -> Bool {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         guard let item = findProjectItem(url: url, in: projectTree), !item.isDirectory else {
-            return
+            return false
         }
         activateNavigatorItem(url)
+        return selectedDocumentID == url
     }
 
     func createProjectFile(named name: String) -> Bool {

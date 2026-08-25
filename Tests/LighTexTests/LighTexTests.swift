@@ -17,6 +17,29 @@ struct LighTexTests {
     }
 
     @Test
+    func recognizesCommonProjectTextFiles() {
+        let markdown = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/README.md"),
+            isDirectory: false,
+            children: nil
+        )
+        let makefile = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/Makefile"),
+            isDirectory: false,
+            children: nil
+        )
+        let image = ProjectItem(
+            url: URL(fileURLWithPath: "/tmp/cover.png"),
+            isDirectory: false,
+            children: nil
+        )
+
+        #expect(markdown.isEditableText)
+        #expect(makefile.isEditableText)
+        #expect(!image.isEditableText)
+    }
+
+    @Test
     func parsesActionableCompilerProblem() {
         #expect(parserFindsFileLineAndMessage())
     }
@@ -65,9 +88,14 @@ struct LighTexTests {
     func projectFileDragUsesNativeFileURLRepresentation() {
         let url = URL(fileURLWithPath: "/tmp/main.tex")
         let provider = NSItemProvider(object: url as NSURL)
+        let pasteboard = NSPasteboard(name: .init("LighTexTests.fileDrop.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+
         #expect(provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier))
         #expect(droppedFilePath(from: url as NSURL) == url.path)
         #expect(droppedFilePath(from: url.absoluteString as NSString) == url.path)
+        #expect(projectFileURLs(from: pasteboard) == [url])
     }
 
     @Test
@@ -500,8 +528,9 @@ struct LighTexTests {
         model.moveDocument(main, relativeTo: vectors, placement: .before)
         #expect(model.openDocuments.map(\.url) == [main, vectors])
 
-        model.openDroppedProjectItem(atPath: main.path)
-        #expect(model.selectedDocumentID == main)
+        #expect(model.openDroppedProjectItem(atPath: notes.path))
+        #expect(model.selectedDocumentID == notes)
+        #expect(model.openDocuments.map(\.url) == [main, vectors, notes])
         #expect(AppModel.validProjectItemName("../bad") == nil)
         #expect(AppModel.validProjectItemName(" chapter.tex ") == "chapter.tex")
     }
