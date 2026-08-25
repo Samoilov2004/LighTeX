@@ -98,6 +98,7 @@ jobs:
         run: |
           gh release view runtime-latest >/dev/null 2>&1 || \
             gh release create runtime-latest \
+              --target "${{ github.sha }}" \
               --title "LighTeX Runtime Preview" \
               --prerelease \
               --notes "Managed TeX Live runtime assets for the first preview. Executables use an ad-hoc signature; archive integrity is protected by the signed manifest and SHA-256 hashes."
