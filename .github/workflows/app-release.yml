@@ -6,7 +6,7 @@ on:
       version:
         description: GitHub release version
         required: true
-        default: "0.5.2"
+        default: "0.6.0-beta.1"
 
 permissions:
   contents: write
@@ -72,8 +72,9 @@ jobs:
             gh release create "v${{ inputs.version }}" \
               --repo "${{ github.repository }}" \
               --target "${{ github.sha }}" \
-              --title "LighTex ${{ inputs.version }} Preview" \
-              --notes "First public preview. This build is not yet notarized by Apple; if macOS blocks the first launch, Control-click LighTex and choose Open."
+              --title "LighTex ${{ inputs.version }} Beta" \
+              --prerelease \
+              --notes "Beta release with the latest editor and project workflow improvements. This build is not yet notarized by Apple; if macOS blocks the first launch, Control-click LighTex and choose Open."
           gh release upload "v${{ inputs.version }}" \
             app-assets/* \
             --repo "${{ github.repository }}" \
