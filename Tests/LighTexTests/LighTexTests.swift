@@ -2,6 +2,7 @@ import Testing
 import AppKit
 import CryptoKit
 import SwiftUI
+import UniformTypeIdentifiers
 @testable import LighTex
 
 struct LighTexTests {
@@ -58,6 +59,15 @@ struct LighTexTests {
             SyncTeXService.sourcePositionArgument(sourceURL: source, line: 17, column: 9)
                 == "17:9:/tmp/My Book/main.tex"
         )
+    }
+
+    @Test
+    func projectFileDragUsesNativeFileURLRepresentation() {
+        let url = URL(fileURLWithPath: "/tmp/main.tex")
+        let provider = NSItemProvider(object: url as NSURL)
+        #expect(provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier))
+        #expect(droppedFilePath(from: url as NSURL) == url.path)
+        #expect(droppedFilePath(from: url.absoluteString as NSString) == url.path)
     }
 
     @Test

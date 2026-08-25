@@ -734,10 +734,7 @@ private struct ProjectFileTreeRow: View {
         } else {
             row
                 .onDrag {
-                    NSItemProvider(
-                        item: item.url.path as NSString,
-                        typeIdentifier: UTType.lighTexProjectFile.identifier
-                    )
+                    NSItemProvider(object: item.url as NSURL)
                 }
                 .help("Drag to the tab bar to open \(item.name)")
         }
@@ -868,10 +865,8 @@ private struct EditorTabBar: View {
         .frame(height: 34)
         .contentShape(Rectangle())
         .onDrop(
-            of: [.lighTexEditorTab, .lighTexProjectFile],
+            of: [.fileURL],
             delegate: EditorTabBarDropDelegate(
-                draggedDocumentID: $draggedDocumentID,
-                dropTargetID: $dropTargetID,
                 isFileDropTarget: $isFileDropTarget,
                 model: model
             )
@@ -887,39 +882,49 @@ private struct EditorTab: View {
     @Binding var draggedDocumentID: URL?
     @Binding var dropTargetID: URL?
     @State private var isHovering = false
+    @FocusState private var isSelectionFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
-            Button {
-                model.selectDocument(document.url)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text(document.displayName)
-                        .font(.system(size: 12, weight: isActive ? .medium : .regular))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if document.isDirty {
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 6, height: 6)
-                            .accessibilityLabel("Unsaved changes")
-                    }
+            HStack(spacing: 6) {
+                Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(document.displayName)
+                    .font(.system(size: 12, weight: isActive ? .medium : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if document.isDirty {
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
                 }
-                .padding(.leading, 10)
-                .padding(.trailing, 7)
-                .frame(height: 34)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .padding(.leading, 10)
+            .padding(.trailing, 7)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.selectDocument(document.url)
+            }
             .onDrag {
                 draggedDocumentID = document.id
                 return NSItemProvider(
                     item: document.url.path as NSString,
                     typeIdentifier: UTType.lighTexEditorTab.identifier
                 )
+            }
+            .focusable()
+            .focused($isSelectionFocused)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(document.isDirty
+                ? "\(document.displayName), unsaved changes"
+                : document.displayName)
+            .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction {
+                model.selectDocument(document.url)
             }
             .help("Select or drag \(document.displayName)")
 
@@ -949,9 +954,17 @@ private struct EditorTab: View {
                 .fill(LighTexTheme.divider)
                 .frame(width: 1)
         }
+        .overlay {
+            if isSelectionFocused {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.accentColor, lineWidth: 2)
+                    .padding(2)
+                    .allowsHitTesting(false)
+            }
+        }
         .onHover { isHovering = $0 }
         .onDrop(
-            of: [.lighTexEditorTab, .lighTexProjectFile],
+            of: [.lighTexEditorTab, .fileURL],
             delegate: EditorTabDropDelegate(
                 targetDocumentID: document.id,
                 draggedDocumentID: $draggedDocumentID,
@@ -990,7 +1003,7 @@ private struct EditorTabDropDelegate: DropDelegate {
     let model: AppModel
 
     func dropEntered(info: DropInfo) {
-        if info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier]) {
+        if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
             dropTargetID = targetDocumentID
             return
         }
@@ -1011,14 +1024,14 @@ private struct EditorTabDropDelegate: DropDelegate {
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DropProposal(
-            operation: info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier])
+            operation: info.hasItemsConforming(to: [UTType.fileURL.identifier])
                 ? .copy
                 : .move
         )
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        if info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier]) {
+        if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
             draggedDocumentID = nil
             dropTargetID = nil
             return openDroppedProjectItem(from: info, model: model)
@@ -1030,13 +1043,11 @@ private struct EditorTabDropDelegate: DropDelegate {
 }
 
 private struct EditorTabBarDropDelegate: DropDelegate {
-    @Binding var draggedDocumentID: URL?
-    @Binding var dropTargetID: URL?
     @Binding var isFileDropTarget: Bool
     let model: AppModel
 
     func dropEntered(info: DropInfo) {
-        isFileDropTarget = info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier])
+        isFileDropTarget = info.hasItemsConforming(to: [UTType.fileURL.identifier])
     }
 
     func dropExited(info: DropInfo) {
@@ -1044,23 +1055,12 @@ private struct EditorTabBarDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]) {
-            return DropProposal(operation: .move)
-        }
         return DropProposal(operation: .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
         defer {
-            draggedDocumentID = nil
-            dropTargetID = nil
             isFileDropTarget = false
-        }
-
-        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
-           let draggedDocumentID {
-            model.moveDocumentToEnd(draggedDocumentID)
-            return true
         }
         return openDroppedProjectItem(from: info, model: model)
     }
@@ -1068,17 +1068,16 @@ private struct EditorTabBarDropDelegate: DropDelegate {
 
 private func openDroppedProjectItem(from info: DropInfo, model: AppModel) -> Bool {
     guard let provider = info.itemProviders(
-        for: [UTType.lighTexProjectFile.identifier]
+        for: [UTType.fileURL.identifier]
     ).first else {
         return false
     }
 
     provider.loadItem(
-        forTypeIdentifier: UTType.lighTexProjectFile.identifier,
+        forTypeIdentifier: UTType.fileURL.identifier,
         options: nil
     ) { item, _ in
-        let path = (item as? String) ?? (item as? NSString).map(String.init)
-        guard let path else { return }
+        guard let path = droppedFilePath(from: item) else { return }
         Task { @MainActor in
             model.openDroppedProjectItem(atPath: path)
         }
@@ -1086,9 +1085,30 @@ private func openDroppedProjectItem(from info: DropInfo, model: AppModel) -> Boo
     return true
 }
 
+func droppedFilePath(from item: NSSecureCoding?) -> String? {
+    if let url = item as? URL {
+        return url.path
+    }
+    if let url = item as? NSURL {
+        return url.path
+    }
+    if let data = item as? Data,
+       let value = String(data: data, encoding: .utf8),
+       let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+       url.isFileURL {
+        return url.path
+    }
+    if let value = item as? String {
+        if let url = URL(string: value), url.isFileURL {
+            return url.path
+        }
+        return value
+    }
+    return nil
+}
+
 private extension UTType {
     static let lighTexEditorTab = UTType(exportedAs: "app.lightex.editor-tab")
-    static let lighTexProjectFile = UTType(exportedAs: "app.lightex.project-file")
 }
 
 private struct PDFWorkspace: View {
