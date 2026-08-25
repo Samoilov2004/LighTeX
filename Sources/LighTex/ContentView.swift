@@ -839,17 +839,44 @@ private struct EditorWorkspace: View {
     }
 }
 
-private struct EditorTabDropIndicator: Equatable {
+struct EditorTabDropIndicator: Equatable {
     let targetDocumentID: URL
     let placement: DocumentMovePlacement
 }
 
-private struct EditorTabWidthPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 1
+private struct EditorTabsContentWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }
+}
+
+private struct EditorTabFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [URL: CGRect] = [:]
+
+    static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+func editorTabDropIndicator(
+    locationX: CGFloat,
+    orderedDocumentIDs: [URL],
+    frames: [URL: CGRect]
+) -> EditorTabDropIndicator? {
+    let visible = orderedDocumentIDs.compactMap { id in
+        frames[id].map { (id, $0) }
+    }
+    guard let first = visible.first, let last = visible.last else { return nil }
+
+    if locationX < first.1.midX {
+        return EditorTabDropIndicator(targetDocumentID: first.0, placement: .before)
+    }
+    for (id, frame) in visible.dropFirst() where locationX < frame.midX {
+        return EditorTabDropIndicator(targetDocumentID: id, placement: .before)
+    }
+    return EditorTabDropIndicator(targetDocumentID: last.0, placement: .after)
 }
 
 private struct EditorTabBar: View {
@@ -859,44 +886,106 @@ private struct EditorTabBar: View {
     @State private var dropIndicator: EditorTabDropIndicator?
     @State private var fileDropTargetID: URL?
     @State private var isFileDropTarget = false
+    @State private var tabsContentWidth: CGFloat = 0
+    @State private var tabFrames: [URL: CGRect] = [:]
+    @State private var draggedDocument: EditorDocument?
+    @State private var draggedTabWidth: CGFloat = 0
+    @State private var dragLocationX: CGFloat = 0
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
-                ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
-                    let isActive = document.id == model.selectedDocumentID
-                    let nextIsActive = visibleDocuments.indices.contains(index + 1)
-                        && visibleDocuments[index + 1].id == model.selectedDocumentID
-                    EditorTab(
-                        document: document,
-                        isActive: isActive,
-                        showsTrailingSeparator: !isActive
-                            && !nextIsActive
-                            && index < visibleDocuments.count - 1,
-                        draggedDocumentID: $draggedDocumentID,
-                        dropIndicator: $dropIndicator,
-                        fileDropTargetID: $fileDropTargetID,
-                        onDragBegan: beginTabDrag
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
+                        HStack(spacing: 0) {
+                            ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
+                                let isActive = document.id == model.selectedDocumentID
+                                let nextIsActive = visibleDocuments.indices.contains(index + 1)
+                                    && visibleDocuments[index + 1].id == model.selectedDocumentID
+                                EditorTab(
+                                    document: document,
+                                    isActive: isActive,
+                                    showsTrailingSeparator: !isActive
+                                        && !nextIsActive
+                                        && index < visibleDocuments.count - 1,
+                                    dropIndicator: $dropIndicator,
+                                    fileDropTargetID: $fileDropTargetID
+                                )
+                            }
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: EditorTabsContentWidthPreferenceKey.self,
+                                    value: proxy.size.width
+                                )
+                            }
+                        }
+
+                        Rectangle()
+                            .fill(
+                                isFileDropTarget
+                                    ? Color.accentColor.opacity(0.07)
+                                    : LighTexTheme.secondaryBackground
+                            )
+                            .frame(
+                                width: max(44, geometry.size.width - tabsContentWidth),
+                                height: 34
+                            )
+                    }
+                    .frame(
+                        width: max(geometry.size.width, tabsContentWidth + 44),
+                        height: 34,
+                        alignment: .leading
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.12),
+                        value: model.openDocuments.map(\.id)
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.12),
+                        value: draggedDocumentID
                     )
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let draggedDocument {
+                    EditorTabDragPreview(document: draggedDocument)
+                        .frame(
+                            width: max(80, draggedTabWidth),
+                            height: 34
+                        )
+                        .position(
+                            x: min(max(dragLocationX, draggedTabWidth / 2), geometry.size.width - draggedTabWidth / 2),
+                            y: 17
+                        )
+                        .allowsHitTesting(false)
+                }
             }
-            .animation(
-                reduceMotion ? nil : .easeInOut(duration: 0.12),
-                value: model.openDocuments.map(\.id)
-            )
-            .animation(
-                reduceMotion ? nil : .easeInOut(duration: 0.12),
-                value: draggedDocumentID
+            .coordinateSpace(name: "EditorTabBar")
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .named("EditorTabBar"))
+                    .onChanged(handleTabDrag)
+                    .onEnded { value in
+                        updateTabPlacement(at: value.location.x)
+                        finishTabDrag()
+                    }
             )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 34)
+        .onPreferenceChange(EditorTabsContentWidthPreferenceKey.self) { width in
+            tabsContentWidth = max(0, width)
+        }
+        .onPreferenceChange(EditorTabFramePreferenceKey.self) { frames in
+            tabFrames = frames
+        }
         .background(
             isFileDropTarget
                 ? Color.accentColor.opacity(0.07)
                 : LighTexTheme.secondaryBackground
         )
-        .frame(height: 34)
         .contentShape(Rectangle())
         .onDrop(
             of: [.fileURL],
@@ -925,12 +1014,45 @@ private struct EditorTabBar: View {
         }
     }
 
-    private func beginTabDrag(_ documentID: URL) {
-        draggedDocumentID = documentID
+    private func handleTabDrag(_ value: DragGesture.Value) {
+        if draggedDocumentID == nil {
+            guard let source = model.openDocuments.first(where: { document in
+                guard let frame = tabFrames[document.id] else { return false }
+                return frame.contains(value.startLocation)
+                    && value.startLocation.x < frame.maxX - 28
+            }), let sourceFrame = tabFrames[source.id] else {
+                return
+            }
+            draggedDocumentID = source.id
+            draggedDocument = source
+            draggedTabWidth = sourceFrame.width
+        }
+        dragLocationX = value.location.x
+        updateTabPlacement(at: value.location.x)
+    }
+
+    private func updateTabPlacement(at locationX: CGFloat) {
+        guard let draggedDocumentID else { return }
+        let visibleIDs = model.openDocuments.map(\.id).filter { $0 != draggedDocumentID }
+        guard let indicator = editorTabDropIndicator(
+            locationX: locationX,
+            orderedDocumentIDs: visibleIDs,
+            frames: tabFrames
+        ), indicator != dropIndicator else {
+            return
+        }
+        dropIndicator = indicator
+        model.moveDocument(
+            draggedDocumentID,
+            relativeTo: indicator.targetDocumentID,
+            placement: indicator.placement
+        )
     }
 
     private func finishTabDrag() {
         draggedDocumentID = nil
+        draggedDocument = nil
+        draggedTabWidth = 0
         dropIndicator = nil
     }
 }
@@ -940,12 +1062,9 @@ private struct EditorTab: View {
     let document: EditorDocument
     let isActive: Bool
     let showsTrailingSeparator: Bool
-    @Binding var draggedDocumentID: URL?
     @Binding var dropIndicator: EditorTabDropIndicator?
     @Binding var fileDropTargetID: URL?
-    let onDragBegan: (URL) -> Void
     @State private var isHovering = false
-    @State private var tabWidth: CGFloat = 1
     @FocusState private var isSelectionFocused: Bool
 
     var body: some View {
@@ -972,15 +1091,6 @@ private struct EditorTab: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 model.selectDocument(document.url)
-            }
-            .onDrag {
-                onDragBegan(document.id)
-                return NSItemProvider(
-                    item: document.url.path as NSString,
-                    typeIdentifier: UTType.lighTexEditorTab.identifier
-                )
-            } preview: {
-                EditorTabDragPreview(document: document)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(document.isDirty
@@ -1044,26 +1154,23 @@ private struct EditorTab: View {
         }
         .background {
             GeometryReader { proxy in
-                Color.clear.preference(
-                    key: EditorTabWidthPreferenceKey.self,
-                    value: proxy.size.width
-                )
+                Color.clear
+                    .preference(
+                        key: EditorTabFramePreferenceKey.self,
+                        value: [
+                            document.id: proxy.frame(in: .named("EditorTabBar"))
+                        ]
+                    )
             }
-        }
-        .onPreferenceChange(EditorTabWidthPreferenceKey.self) { width in
-            tabWidth = max(1, width)
         }
         .focusable()
         .focused($isSelectionFocused)
         .focusEffectDisabled()
         .onHover { isHovering = $0 }
         .onDrop(
-            of: [.lighTexEditorTab, .fileURL],
-            delegate: EditorTabDropDelegate(
+            of: [.fileURL],
+            delegate: EditorTabFileDropDelegate(
                 targetDocumentID: document.id,
-                targetWidth: tabWidth,
-                draggedDocumentID: $draggedDocumentID,
-                dropIndicator: $dropIndicator,
                 fileDropTargetID: $fileDropTargetID,
                 model: model
             )
@@ -1160,76 +1267,30 @@ private struct EditorTabDragPreview: View {
     }
 }
 
-private struct EditorTabDropDelegate: DropDelegate {
+private struct EditorTabFileDropDelegate: DropDelegate {
     let targetDocumentID: URL
-    let targetWidth: CGFloat
-    @Binding var draggedDocumentID: URL?
-    @Binding var dropIndicator: EditorTabDropIndicator?
     @Binding var fileDropTargetID: URL?
     let model: AppModel
 
     func dropEntered(info: DropInfo) {
         if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
             fileDropTargetID = targetDocumentID
-            return
         }
-        updateTabPlacement(for: info)
     }
 
     func dropExited(info: DropInfo) {
         if fileDropTargetID == targetDocumentID {
             fileDropTargetID = nil
         }
-        if dropIndicator?.targetDocumentID == targetDocumentID {
-            dropIndicator = nil
-        }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]) {
-            updateTabPlacement(for: info)
-        }
-        return DropProposal(
-            operation: info.hasItemsConforming(to: [UTType.fileURL.identifier])
-                ? .copy
-                : .move
-        )
+        DropProposal(operation: .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
-            draggedDocumentID = nil
-            dropIndicator = nil
-            fileDropTargetID = nil
-            return openDroppedProjectItem(from: info, model: model)
-        }
-        draggedDocumentID = nil
-        dropIndicator = nil
         fileDropTargetID = nil
-        return true
-    }
-
-    private func updateTabPlacement(for info: DropInfo) {
-        guard info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
-              let draggedDocumentID,
-              draggedDocumentID != targetDocumentID else {
-            return
-        }
-
-        let placement: DocumentMovePlacement = info.location.x < targetWidth / 2
-            ? .before
-            : .after
-        let newIndicator = EditorTabDropIndicator(
-            targetDocumentID: targetDocumentID,
-            placement: placement
-        )
-        guard dropIndicator != newIndicator else { return }
-        dropIndicator = newIndicator
-        model.moveDocument(
-            draggedDocumentID,
-            relativeTo: targetDocumentID,
-            placement: placement
-        )
+        return openDroppedProjectItem(from: info, model: model)
     }
 }
 
@@ -1296,10 +1357,6 @@ func droppedFilePath(from item: NSSecureCoding?) -> String? {
         return value
     }
     return nil
-}
-
-private extension UTType {
-    static let lighTexEditorTab = UTType(exportedAs: "app.lightex.editor-tab")
 }
 
 private struct PDFWorkspace: View {

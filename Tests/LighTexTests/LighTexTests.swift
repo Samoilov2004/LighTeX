@@ -71,6 +71,27 @@ struct LighTexTests {
     }
 
     @Test
+    func resolvesTwoTabDropPositionsAcrossTheWholeBar() {
+        let remaining = URL(fileURLWithPath: "/tmp/notes.tex")
+        let frames = [remaining: CGRect(x: 0, y: 0, width: 100, height: 34)]
+
+        #expect(
+            editorTabDropIndicator(
+                locationX: 20,
+                orderedDocumentIDs: [remaining],
+                frames: frames
+            ) == EditorTabDropIndicator(targetDocumentID: remaining, placement: .before)
+        )
+        #expect(
+            editorTabDropIndicator(
+                locationX: 400,
+                orderedDocumentIDs: [remaining],
+                frames: frames
+            ) == EditorTabDropIndicator(targetDocumentID: remaining, placement: .after)
+        )
+    }
+
+    @Test
     func compilesMinimalLatexProject() async throws {
         #expect(try await latexBuildProducesPDF())
     }
@@ -471,6 +492,14 @@ struct LighTexTests {
         #expect(model.openDocuments.map(\.url) == [main, vectors, notes])
         model.moveDocument(vectors, relativeTo: notes, placement: .after)
         #expect(model.openDocuments.map(\.url) == [main, notes, vectors])
+
+        model.closeDocument(notes)
+        #expect(model.openDocuments.map(\.url) == [main, vectors])
+        model.moveDocument(main, relativeTo: vectors, placement: .after)
+        #expect(model.openDocuments.map(\.url) == [vectors, main])
+        model.moveDocument(main, relativeTo: vectors, placement: .before)
+        #expect(model.openDocuments.map(\.url) == [main, vectors])
+
         model.openDroppedProjectItem(atPath: main.path)
         #expect(model.selectedDocumentID == main)
         #expect(AppModel.validProjectItemName("../bad") == nil)
