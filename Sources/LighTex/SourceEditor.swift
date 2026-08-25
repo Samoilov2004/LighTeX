@@ -1,7 +1,28 @@
 import AppKit
 import SwiftUI
 
-let editorLineHeightMultiple: CGFloat = 1.24
+let editorBaseTextColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+
+func editorLineHeight(for font: NSFont) -> CGFloat {
+    ceil(font.pointSize * 4 / 3)
+}
+
+func editorParagraphStyle(font: NSFont, tabWidth: Int) -> NSParagraphStyle {
+    let paragraph = NSMutableParagraphStyle()
+    let lineHeight = editorLineHeight(for: font)
+    paragraph.minimumLineHeight = lineHeight
+    paragraph.maximumLineHeight = lineHeight
+    paragraph.lineHeightMultiple = 1
+    paragraph.tabStops = []
+    paragraph.defaultTabInterval = font.maximumAdvancement.width * CGFloat(max(1, tabWidth))
+    return paragraph.copy() as! NSParagraphStyle
+}
+
+func editorBaselineOffset(font: NSFont, lineHeight: CGFloat) -> CGFloat {
+    let fontHeight = font.ascender - font.descender + font.leading
+    let topLeading = max(0, (lineHeight - fontHeight) / 2)
+    return topLeading + font.ascender
+}
 
 struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
@@ -58,12 +79,20 @@ struct SourceEditor: NSViewRepresentable {
         func applySyntaxHighlighting(to textView: CodeTextView) {
             guard let textStorage = textView.textStorage else { return }
             isApplyingUpdate = true
-            SyntaxHighlighter.apply(
+            SyntaxHighlighter.applyColors(to: textStorage)
+            textView.refreshTypingAttributes()
+            isApplyingUpdate = false
+        }
+
+        func applyTypography(to textView: CodeTextView) {
+            guard let textStorage = textView.textStorage else { return }
+            isApplyingUpdate = true
+            SyntaxHighlighter.applyTypography(
                 to: textStorage,
                 font: textView.editorFont,
-                lineHeightMultiple: editorLineHeightMultiple,
-                tabWidth: textView.editorTabWidth
+                paragraphStyle: textView.editorParagraphStyle
             )
+            textView.refreshTypingAttributes()
             isApplyingUpdate = false
         }
 
@@ -209,6 +238,7 @@ struct SourceEditor: NSViewRepresentable {
             object: scrollView.contentView
         )
 
+        context.coordinator.applyTypography(to: textView)
         context.coordinator.applySyntaxHighlighting(to: textView)
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastTabWidth = tabWidth
@@ -252,11 +282,11 @@ struct SourceEditor: NSViewRepresentable {
                 location: min(selection.location, length),
                 length: min(selection.length, max(0, length - min(selection.location, length)))
             ))
+            context.coordinator.applyTypography(to: textView)
             context.coordinator.applySyntaxHighlighting(to: textView)
             context.coordinator.isApplyingUpdate = false
-        }
-
-        if typographyChanged {
+        } else if typographyChanged {
+            context.coordinator.applyTypography(to: textView)
             context.coordinator.applySyntaxHighlighting(to: textView)
         }
 
@@ -275,15 +305,22 @@ struct SourceEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.usesFindPanel = true
         textView.isIncrementalSearchingEnabled = true
-        textView.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        textView.textColor = editorBaseTextColor
         textView.backgroundColor = .white
         textView.insertionPointColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.textContainer?.lineFragmentPadding = 0
         textView.editorFont = NSFont(name: "SFMono-Regular", size: fontSize)
             ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        textView.font = textView.editorFont
         textView.editorTabWidth = max(1, tabWidth)
+        textView.editorLineHeight = editorLineHeight(for: textView.editorFont)
+        textView.editorParagraphStyle = editorParagraphStyle(
+            font: textView.editorFont,
+            tabWidth: textView.editorTabWidth
+        )
+        textView.font = textView.editorFont
+        textView.defaultParagraphStyle = textView.editorParagraphStyle
+        textView.refreshTypingAttributes()
         textView.closesBracketsAutomatically = autoCloseBrackets
         textView.isVerticallyResizable = true
 
@@ -311,8 +348,18 @@ final class CodeTextView: NSTextView {
     var editorTabWidth = 4
     var closesBracketsAutomatically = true
     var editorFont = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+    var editorLineHeight: CGFloat = 18
+    var editorParagraphStyle: NSParagraphStyle = .default
     var opensAtDocumentStart = false
     var onWordDoubleClick: ((Int, Int) -> Void)?
+
+    func refreshTypingAttributes() {
+        typingAttributes = [
+            .font: editorFont,
+            .foregroundColor: editorBaseTextColor,
+            .paragraphStyle: editorParagraphStyle
+        ]
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -602,42 +649,33 @@ func sourceLineNumber(atUTF16Location location: Int, in text: NSString) -> Int {
     return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
 }
 
-func estimatedTextBaselineY(
-    lineTop: CGFloat,
-    lineHeight: CGFloat,
-    fontAscender: CGFloat,
-    fontDescender: CGFloat,
-    fontLeading: CGFloat
-) -> CGFloat {
-    let fontHeight = fontAscender - fontDescender + fontLeading
-    let topLeading = max(0, (lineHeight - fontHeight) / 2)
-    return lineTop + topLeading + fontAscender
-}
-
 func lineNumberOriginY(sourceBaselineY: CGFloat, numberFontAscender: CGFloat) -> CGFloat {
     sourceBaselineY - numberFontAscender
 }
 
 private enum SyntaxHighlighter {
-    static func apply(
+    static func applyTypography(
         to storage: NSTextStorage,
         font: NSFont,
-        lineHeightMultiple: CGFloat,
-        tabWidth: Int
+        paragraphStyle: NSParagraphStyle
     ) {
         let fullRange = NSRange(location: 0, length: storage.length)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = lineHeightMultiple
-        paragraph.tabStops = []
-        paragraph.defaultTabInterval = font.maximumAdvancement.width * CGFloat(max(1, tabWidth))
+        guard fullRange.length > 0 else { return }
 
         storage.beginEditing()
-        storage.setAttributes([
+        storage.addAttributes([
             .font: font,
-            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1),
-            .paragraphStyle: paragraph
+            .paragraphStyle: paragraphStyle
         ], range: fullRange)
+        storage.endEditing()
+    }
 
+    static func applyColors(to storage: NSTextStorage) {
+        let fullRange = NSRange(location: 0, length: storage.length)
+        guard fullRange.length > 0 else { return }
+
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: editorBaseTextColor, range: fullRange)
         apply(#"%.*$"#, color: .secondaryLabelColor, options: [.anchorsMatchLines], to: storage)
         apply(#"\\[A-Za-z@]+\*?"#, color: NSColor.systemBlue.withAlphaComponent(0.88), to: storage)
         apply(#"\$[^$\n]+\$"#, color: NSColor.systemPurple.withAlphaComponent(0.76), to: storage)
@@ -662,9 +700,9 @@ private enum SyntaxHighlighter {
 }
 
 final class LineNumberRulerView: NSRulerView {
-    weak var textView: NSTextView?
+    weak var textView: CodeTextView?
 
-    init(textView: NSTextView, scrollView: NSScrollView) {
+    init(textView: CodeTextView, scrollView: NSScrollView) {
         self.textView = textView
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
@@ -707,20 +745,14 @@ final class LineNumberRulerView: NSRulerView {
         )
         let string = textView.string as NSString
         guard string.length > 0 else {
-            let lineHeight = max(
-                layoutManager.extraLineFragmentRect.height,
-                layoutManager.defaultLineHeight(for: textView.font ?? .systemFont(ofSize: 13))
-            )
-            let font = textView.font ?? .systemFont(ofSize: 13)
             drawLineNumber(
                 1,
-                sourceBaselineY: estimatedTextBaselineY(
-                    lineTop: textView.textContainerInset.height - visibleRect.minY,
-                    lineHeight: lineHeight,
-                    fontAscender: font.ascender,
-                    fontDescender: font.descender,
-                    fontLeading: font.leading
-                )
+                sourceBaselineY: textView.textContainerInset.height
+                    - visibleRect.minY
+                    + editorBaselineOffset(
+                        font: textView.editorFont,
+                        lineHeight: textView.editorLineHeight
+                    )
             )
             return
         }
@@ -741,11 +773,13 @@ final class LineNumberRulerView: NSRulerView {
                 forGlyphAt: lineGlyphRange.location,
                 effectiveRange: nil
             )
-            let glyphLocation = layoutManager.location(forGlyphAt: lineGlyphRange.location)
             lineRect.origin.y += textView.textContainerInset.height
             let baselineY = lineRect.minY
-                + glyphLocation.y
                 - visibleRect.minY
+                + editorBaselineOffset(
+                    font: textView.editorFont,
+                    lineHeight: textView.editorLineHeight
+                )
             drawLineNumber(lineNumber, sourceBaselineY: baselineY)
 
             let next = NSMaxRange(lineRange)
@@ -761,15 +795,11 @@ final class LineNumberRulerView: NSRulerView {
             let y = trailingRect.minY - visibleRect.minY
             if trailingRect.maxY >= visibleRect.minY,
                trailingRect.minY <= visibleRect.maxY {
-                let font = textView.font ?? .systemFont(ofSize: 13)
                 drawLineNumber(
                     sourceLineNumber(atUTF16Location: string.length, in: string),
-                    sourceBaselineY: estimatedTextBaselineY(
-                        lineTop: y,
-                        lineHeight: trailingRect.height,
-                        fontAscender: font.ascender,
-                        fontDescender: font.descender,
-                        fontLeading: font.leading
+                    sourceBaselineY: y + editorBaselineOffset(
+                        font: textView.editorFont,
+                        lineHeight: textView.editorLineHeight
                     )
                 )
             }

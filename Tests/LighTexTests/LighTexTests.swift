@@ -163,7 +163,13 @@ struct LighTexTests {
             at: 0,
             effectiveRange: nil
         ) as? NSParagraphStyle
-        #expect(paragraphStyle?.lineHeightMultiple == editorLineHeightMultiple)
+        let expectedLineHeight = editorLineHeight(for: textView!.editorFont)
+        #expect(paragraphStyle?.minimumLineHeight == expectedLineHeight)
+        #expect(paragraphStyle?.maximumLineHeight == expectedLineHeight)
+        #expect(paragraphStyle?.lineHeightMultiple == 1)
+        let typingParagraph = textView?.typingAttributes[.paragraphStyle] as? NSParagraphStyle
+        #expect(typingParagraph?.minimumLineHeight == expectedLineHeight)
+        #expect(typingParagraph?.maximumLineHeight == expectedLineHeight)
         #expect(
             textView?.layoutManager?.temporaryAttribute(
                 .backgroundColor,
@@ -171,6 +177,55 @@ struct LighTexTests {
                 effectiveRange: nil
             ) == nil
         )
+    }
+
+    @Test @MainActor
+    func typingIntoBlankLineKeepsItsLineFragmentStable() async throws {
+        let source = "first\n\nthird"
+        let text = EditorTextBox(source)
+        let editor = SourceEditor(
+            text: Binding(
+                get: { text.value },
+                set: { text.value = $0 }
+            ),
+            fontSize: 13.5,
+            tabWidth: 4,
+            showsLineNumbers: true,
+            wordWrap: false,
+            autoCloseBrackets: true,
+            jumpLine: nil,
+            jumpToken: 0,
+            onCursorChange: { _, _ in },
+            onWordDoubleClick: { _, _ in }
+        )
+        let host = NSHostingView(rootView: editor)
+        host.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
+        host.layoutSubtreeIfNeeded()
+        await Task.yield()
+        host.layoutSubtreeIfNeeded()
+
+        let textView = try #require(findCodeTextView(in: host))
+        let scrollView = try #require(textView.enclosingScrollView)
+        let before = try lineFragmentRect(in: textView, atCharacter: 6)
+        let scrollOrigin = scrollView.contentView.bounds.origin
+
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+        textView.insertText("efve", replacementRange: textView.selectedRange())
+        textView.layoutManager?.ensureLayout(for: try #require(textView.textContainer))
+
+        let after = try lineFragmentRect(in: textView, atCharacter: 6)
+        let insertedParagraph = textView.textStorage?.attribute(
+            .paragraphStyle,
+            at: 6,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+
+        #expect(textView.string == "first\nefve\nthird")
+        #expect(after.minY == before.minY)
+        #expect(after.height == before.height)
+        #expect(scrollView.contentView.bounds.origin == scrollOrigin)
+        #expect(insertedParagraph?.minimumLineHeight == textView.editorLineHeight)
+        #expect(insertedParagraph?.maximumLineHeight == textView.editorLineHeight)
     }
 
     @Test @MainActor
@@ -226,21 +281,20 @@ struct LighTexTests {
     }
 
     @Test
-    func alignsLineNumbersToTheSourceTextBaseline() {
-        #expect(
-            estimatedTextBaselineY(
-                lineTop: 10,
-                lineHeight: 20,
-                fontAscender: 11,
-                fontDescender: -3,
-                fontLeading: 0
-            ) == 24
-        )
+    func usesOneFixedEditorLineMetric() {
+        let font = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+        let lineHeight = editorLineHeight(for: font)
+        let paragraph = editorParagraphStyle(font: font, tabWidth: 4)
+
+        #expect(lineHeight == 18)
+        #expect(paragraph.minimumLineHeight == lineHeight)
+        #expect(paragraph.maximumLineHeight == lineHeight)
+        #expect(paragraph.lineHeightMultiple == 1)
         #expect(
             lineNumberOriginY(
-                sourceBaselineY: 24,
+                sourceBaselineY: editorBaselineOffset(font: font, lineHeight: lineHeight),
                 numberFontAscender: 8
-            ) == 16
+            ) == editorBaselineOffset(font: font, lineHeight: lineHeight) - 8
         )
     }
 
@@ -645,4 +699,22 @@ private func findCodeTextView(in view: NSView) -> CodeTextView? {
         }
     }
     return nil
+}
+
+@MainActor
+private func lineFragmentRect(
+    in textView: CodeTextView,
+    atCharacter characterIndex: Int
+) throws -> NSRect {
+    let layoutManager = try #require(textView.layoutManager)
+    let textContainer = try #require(textView.textContainer)
+    layoutManager.ensureLayout(for: textContainer)
+    let glyphRange = layoutManager.glyphRange(
+        forCharacterRange: NSRange(location: characterIndex, length: 1),
+        actualCharacterRange: nil
+    )
+    return layoutManager.lineFragmentRect(
+        forGlyphAt: glyphRange.location,
+        effectiveRange: nil
+    )
 }
