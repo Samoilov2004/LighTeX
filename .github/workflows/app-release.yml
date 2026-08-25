@@ -6,7 +6,7 @@ on:
       version:
         description: GitHub release version
         required: true
-        default: "0.5.1"
+        default: "0.5.2"
 
 permissions:
   contents: write
@@ -31,16 +31,21 @@ jobs:
       - name: Build ad-hoc signed preview app
         run: ./scripts/build-app.sh
 
+      - name: Prepare DMG tooling
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild-venv"
+          "$RUNNER_TEMP/dmgbuild-venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            -r scripts/release-requirements.txt
+
       - name: Package preview app
+        env:
+          DMGBUILD_EXECUTABLE: ${{ runner.temp }}/dmgbuild-venv/bin/dmgbuild
         run: |
           ZIP="$RUNNER_TEMP/LighTex-${{ inputs.version }}-${{ matrix.platform.architecture }}.zip"
           DMG="$RUNNER_TEMP/LighTex-${{ inputs.version }}-${{ matrix.platform.architecture }}.dmg"
           ditto -c -k --sequesterRsrc --keepParent dist/LighTex.app "$ZIP"
-          DMG_ROOT="$RUNNER_TEMP/LighTex DMG"
-          mkdir -p "$DMG_ROOT"
-          ditto dist/LighTex.app "$DMG_ROOT/LighTex.app"
-          ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname LighTex -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG"
+          ./scripts/create-dmg.sh dist/LighTex.app "$DMG" LighTex
 
       - uses: actions/upload-artifact@v4
         with:

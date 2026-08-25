@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.1-arm64.dmg">
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.2-arm64.dmg">
     <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for Apple Silicon">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.1-x86_64.dmg">Download for an Intel Mac</a>
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-0.5.2-x86_64.dmg">Download for an Intel Mac</a>
 </p>
 
 ## Install
