@@ -837,21 +837,42 @@ private struct EditorWorkspace: View {
     }
 }
 
+private struct EditorTabDropIndicator: Equatable {
+    let targetDocumentID: URL
+    let placement: DocumentMovePlacement
+}
+
+private struct EditorTabWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct EditorTabBar: View {
     @EnvironmentObject private var model: AppModel
     @State private var draggedDocumentID: URL?
-    @State private var dropTargetID: URL?
+    @State private var dropIndicator: EditorTabDropIndicator?
+    @State private var fileDropTargetID: URL?
     @State private var isFileDropTarget = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ForEach(model.openDocuments) { document in
+                ForEach(Array(model.openDocuments.enumerated()), id: \.element.id) { index, document in
+                    let isActive = document.id == model.selectedDocumentID
+                    let nextIsActive = model.openDocuments.indices.contains(index + 1)
+                        && model.openDocuments[index + 1].id == model.selectedDocumentID
                     EditorTab(
                         document: document,
-                        isActive: document.id == model.selectedDocumentID,
+                        isActive: isActive,
+                        showsTrailingSeparator: !isActive
+                            && !nextIsActive
+                            && index < model.openDocuments.count - 1,
                         draggedDocumentID: $draggedDocumentID,
-                        dropTargetID: $dropTargetID
+                        dropIndicator: $dropIndicator,
+                        fileDropTargetID: $fileDropTargetID
                     )
                 }
             }
@@ -879,9 +900,12 @@ private struct EditorTab: View {
     @EnvironmentObject private var model: AppModel
     let document: EditorDocument
     let isActive: Bool
+    let showsTrailingSeparator: Bool
     @Binding var draggedDocumentID: URL?
-    @Binding var dropTargetID: URL?
+    @Binding var dropIndicator: EditorTabDropIndicator?
+    @Binding var fileDropTargetID: URL?
     @State private var isHovering = false
+    @State private var tabWidth: CGFloat = 1
     @FocusState private var isSelectionFocused: Bool
 
     var body: some View {
@@ -916,8 +940,6 @@ private struct EditorTab: View {
                     typeIdentifier: UTType.lighTexEditorTab.identifier
                 )
             }
-            .focusable()
-            .focused($isSelectionFocused)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(document.isDirty
                 ? "\(document.displayName), unsaved changes"
@@ -944,31 +966,63 @@ private struct EditorTab: View {
             .padding(.trailing, 6)
         }
         .frame(height: 34)
-        .background(
-            dropTargetID == document.id
-                ? Color.accentColor.opacity(0.10)
-                : (isActive ? Color.white : (isHovering ? LighTexTheme.hover : .clear))
-        )
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tabSurfaceColor)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 3)
+        }
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(LighTexTheme.divider)
-                .frame(width: 1)
+            if showsTrailingSeparator {
+                Rectangle()
+                    .fill(LighTexTheme.divider)
+                    .frame(width: 1, height: 18)
+            }
         }
         .overlay {
-            if isSelectionFocused {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(Color.accentColor, lineWidth: 2)
-                    .padding(2)
+            if isActive || isSelectionFocused {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        Color.accentColor.opacity(isSelectionFocused ? 0.82 : 0.58),
+                        lineWidth: 1
+                    )
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 3)
                     .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: insertionAlignment) {
+            if dropIndicator?.targetDocumentID == document.id {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.accentColor)
+                    .frame(width: 2, height: 24)
+                    .padding(.horizontal, 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: EditorTabWidthPreferenceKey.self,
+                    value: proxy.size.width
+                )
+            }
+        }
+        .onPreferenceChange(EditorTabWidthPreferenceKey.self) { width in
+            tabWidth = max(1, width)
+        }
+        .focusable()
+        .focused($isSelectionFocused)
+        .focusEffectDisabled()
         .onHover { isHovering = $0 }
         .onDrop(
             of: [.lighTexEditorTab, .fileURL],
             delegate: EditorTabDropDelegate(
                 targetDocumentID: document.id,
+                targetWidth: tabWidth,
                 draggedDocumentID: $draggedDocumentID,
-                dropTargetID: $dropTargetID,
+                dropIndicator: $dropIndicator,
+                fileDropTargetID: $fileDropTargetID,
                 model: model
             )
         )
@@ -976,13 +1030,21 @@ private struct EditorTab: View {
             if let index = model.openDocuments.firstIndex(where: { $0.id == document.id }) {
                 Button("Move Tab Left") {
                     guard index > 0 else { return }
-                    model.moveDocument(document.id, to: model.openDocuments[index - 1].id)
+                    model.moveDocument(
+                        document.id,
+                        relativeTo: model.openDocuments[index - 1].id,
+                        placement: .before
+                    )
                 }
                 .disabled(index == 0)
 
                 Button("Move Tab Right") {
                     guard index + 1 < model.openDocuments.count else { return }
-                    model.moveDocument(document.id, to: model.openDocuments[index + 1].id)
+                    model.moveDocument(
+                        document.id,
+                        relativeTo: model.openDocuments[index + 1].id,
+                        placement: .after
+                    )
                 }
                 .disabled(index + 1 == model.openDocuments.count)
 
@@ -994,36 +1056,56 @@ private struct EditorTab: View {
             }
         }
     }
+
+    private var tabSurfaceColor: Color {
+        if fileDropTargetID == document.id {
+            return Color.accentColor.opacity(0.09)
+        }
+        if isActive {
+            return Color.white
+        }
+        return isHovering ? LighTexTheme.hover : Color.clear
+    }
+
+    private var insertionAlignment: Alignment {
+        guard let dropIndicator,
+              dropIndicator.targetDocumentID == document.id else {
+            return .leading
+        }
+        return dropIndicator.placement == .before ? .leading : .trailing
+    }
 }
 
 private struct EditorTabDropDelegate: DropDelegate {
     let targetDocumentID: URL
+    let targetWidth: CGFloat
     @Binding var draggedDocumentID: URL?
-    @Binding var dropTargetID: URL?
+    @Binding var dropIndicator: EditorTabDropIndicator?
+    @Binding var fileDropTargetID: URL?
     let model: AppModel
 
     func dropEntered(info: DropInfo) {
         if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
-            dropTargetID = targetDocumentID
+            fileDropTargetID = targetDocumentID
             return
         }
-        guard info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
-              let draggedDocumentID,
-              draggedDocumentID != targetDocumentID else {
-            return
-        }
-        dropTargetID = targetDocumentID
-        model.moveDocument(draggedDocumentID, to: targetDocumentID)
+        updateTabPlacement(for: info)
     }
 
     func dropExited(info: DropInfo) {
-        if dropTargetID == targetDocumentID {
-            dropTargetID = nil
+        if fileDropTargetID == targetDocumentID {
+            fileDropTargetID = nil
+        }
+        if dropIndicator?.targetDocumentID == targetDocumentID {
+            dropIndicator = nil
         }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(
+        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]) {
+            updateTabPlacement(for: info)
+        }
+        return DropProposal(
             operation: info.hasItemsConforming(to: [UTType.fileURL.identifier])
                 ? .copy
                 : .move
@@ -1033,12 +1115,37 @@ private struct EditorTabDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
             draggedDocumentID = nil
-            dropTargetID = nil
+            dropIndicator = nil
+            fileDropTargetID = nil
             return openDroppedProjectItem(from: info, model: model)
         }
         draggedDocumentID = nil
-        dropTargetID = nil
+        dropIndicator = nil
+        fileDropTargetID = nil
         return true
+    }
+
+    private func updateTabPlacement(for info: DropInfo) {
+        guard info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
+              let draggedDocumentID,
+              draggedDocumentID != targetDocumentID else {
+            return
+        }
+
+        let placement: DocumentMovePlacement = info.location.x < targetWidth / 2
+            ? .before
+            : .after
+        let newIndicator = EditorTabDropIndicator(
+            targetDocumentID: targetDocumentID,
+            placement: placement
+        )
+        guard dropIndicator != newIndicator else { return }
+        dropIndicator = newIndicator
+        model.moveDocument(
+            draggedDocumentID,
+            relativeTo: targetDocumentID,
+            placement: placement
+        )
     }
 }
 

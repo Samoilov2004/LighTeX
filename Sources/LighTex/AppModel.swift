@@ -2,6 +2,11 @@ import AppKit
 import Combine
 import Foundation
 
+enum DocumentMovePlacement: Sendable, Equatable {
+    case before
+    case after
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var projectURL: URL?
@@ -419,25 +424,24 @@ final class AppModel: ObservableObject {
         persistOpenDocuments()
     }
 
-    func moveDocument(_ sourceURL: URL, to targetURL: URL) {
+    func moveDocument(
+        _ sourceURL: URL,
+        relativeTo targetURL: URL,
+        placement: DocumentMovePlacement
+    ) {
         guard sourceURL != targetURL,
               let sourceIndex = openDocuments.firstIndex(where: { $0.url == sourceURL }),
-              let targetIndex = openDocuments.firstIndex(where: { $0.url == targetURL }) else {
+              openDocuments.contains(where: { $0.url == targetURL }) else {
             return
         }
 
         let document = openDocuments.remove(at: sourceIndex)
-        openDocuments.insert(document, at: min(targetIndex, openDocuments.count))
-        persistOpenDocuments()
-    }
-
-    func moveDocumentToEnd(_ url: URL) {
-        guard let index = openDocuments.firstIndex(where: { $0.url == url }),
-              index != openDocuments.indices.last else {
+        guard let targetIndex = openDocuments.firstIndex(where: { $0.url == targetURL }) else {
+            openDocuments.insert(document, at: min(sourceIndex, openDocuments.count))
             return
         }
-        let document = openDocuments.remove(at: index)
-        openDocuments.append(document)
+        let insertionIndex = placement == .before ? targetIndex : targetIndex + 1
+        openDocuments.insert(document, at: min(insertionIndex, openDocuments.count))
         persistOpenDocuments()
     }
 
