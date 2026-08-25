@@ -859,8 +859,6 @@ private struct EditorTabBar: View {
     @State private var dropIndicator: EditorTabDropIndicator?
     @State private var fileDropTargetID: URL?
     @State private var isFileDropTarget = false
-    @State private var localDragEndMonitor: Any?
-    @State private var globalDragEndMonitor: Any?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -908,9 +906,15 @@ private struct EditorTabBar: View {
             )
         )
         .accessibilityLabel("Open editor tabs")
-        .onChange(of: draggedDocumentID) { _, documentID in
-            if documentID == nil {
-                removeDragEndMonitors()
+        .task(id: draggedDocumentID) {
+            guard draggedDocumentID != nil else { return }
+
+            while !Task.isCancelled, NSEvent.pressedMouseButtons & 1 != 0 {
+                try? await Task.sleep(nanoseconds: 40_000_000)
+            }
+
+            if !Task.isCancelled {
+                finishTabDrag()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
@@ -923,43 +927,11 @@ private struct EditorTabBar: View {
 
     private func beginTabDrag(_ documentID: URL) {
         draggedDocumentID = documentID
-        guard localDragEndMonitor == nil, globalDragEndMonitor == nil else { return }
-
-        localDragEndMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseUp, .keyDown]
-        ) { event in
-            let finishesDrag = event.type == .leftMouseUp
-                || (event.type == .keyDown && event.keyCode == 53)
-            if finishesDrag {
-                DispatchQueue.main.async {
-                    finishTabDrag()
-                }
-            }
-            return event
-        }
-
-        globalDragEndMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { _ in
-            DispatchQueue.main.async {
-                finishTabDrag()
-            }
-        }
     }
 
     private func finishTabDrag() {
         draggedDocumentID = nil
         dropIndicator = nil
-        removeDragEndMonitors()
-    }
-
-    private func removeDragEndMonitors() {
-        if let localDragEndMonitor {
-            NSEvent.removeMonitor(localDragEndMonitor)
-            self.localDragEndMonitor = nil
-        }
-        if let globalDragEndMonitor {
-            NSEvent.removeMonitor(globalDragEndMonitor)
-            self.globalDragEndMonitor = nil
-        }
     }
 }
 
