@@ -155,14 +155,51 @@ struct LighTexTests {
         #expect((textView?.frame.width ?? 0) > 0)
         #expect((textView?.frame.height ?? 0) > 0)
         #expect(textView?.appearance?.name == .aqua)
-        #expect(textView?.textContainerInset.width == 9)
+        #expect(textView?.textContainerInset.width == 6)
+        #expect(textView?.textContainerInset.height == 8)
         #expect(textView?.textContainer?.lineFragmentPadding == 0)
+        let paragraphStyle = textView?.textStorage?.attribute(
+            .paragraphStyle,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(paragraphStyle?.lineHeightMultiple == editorLineHeightMultiple)
         #expect(
             textView?.layoutManager?.temporaryAttribute(
                 .backgroundColor,
                 atCharacterIndex: 0,
                 effectiveRange: nil
             ) == nil
+        )
+    }
+
+    @Test @MainActor
+    func completesLatexEnvironmentOnReturn() {
+        let textView = CodeTextView()
+        textView.editorTabWidth = 4
+        textView.string = "  \\begin{eq}"
+        textView.setSelectedRange(NSRange(
+            location: ("  \\begin{eq" as NSString).length,
+            length: 0
+        ))
+
+        let context = latexEnvironmentCompletionContext(
+            in: textView.string,
+            selection: textView.selectedRange()
+        )
+        #expect(context?.query == "eq")
+        #expect(context?.replacementRange.length == 3)
+        #expect(latexEnvironmentCompletions(for: "eq") == ["equation", "equation*"])
+
+        textView.insertNewline(nil)
+
+        #expect(
+            textView.string
+                == "  \\begin{equation}\n      \n  \\end{equation}"
+        )
+        #expect(
+            textView.selectedRange().location
+                == ("  \\begin{equation}\n      " as NSString).length
         )
     }
 

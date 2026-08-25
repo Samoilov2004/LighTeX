@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+let editorLineHeightMultiple: CGFloat = 1.24
+
 struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
     let fontSize: Double
@@ -59,7 +61,7 @@ struct SourceEditor: NSViewRepresentable {
             SyntaxHighlighter.apply(
                 to: textStorage,
                 font: textView.editorFont,
-                lineHeightMultiple: 1.46,
+                lineHeightMultiple: editorLineHeightMultiple,
                 tabWidth: textView.editorTabWidth
             )
             isApplyingUpdate = false
@@ -276,7 +278,7 @@ struct SourceEditor: NSViewRepresentable {
         textView.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         textView.backgroundColor = .white
         textView.insertionPointColor = NSColor(calibratedWhite: 0.12, alpha: 1)
-        textView.textContainerInset = NSSize(width: 9, height: 14)
+        textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.textContainer?.lineFragmentPadding = 0
         textView.editorFont = NSFont(name: "SFMono-Regular", size: fontSize)
             ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -330,7 +332,58 @@ final class CodeTextView: NSTextView {
     }
 
     override func insertTab(_ sender: Any?) {
+        if acceptLatexEnvironmentCompletion() {
+            return
+        }
         insertText(String(repeating: " ", count: editorTabWidth), replacementRange: selectedRange())
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if acceptLatexEnvironmentCompletion() {
+            return
+        }
+        super.insertNewline(sender)
+    }
+
+    override var rangeForUserCompletion: NSRange {
+        latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        )?.partialRange ?? NSRange(location: NSNotFound, length: 0)
+    }
+
+    override func completions(
+        forPartialWordRange charRange: NSRange,
+        indexOfSelectedItem index: UnsafeMutablePointer<Int>
+    ) -> [String]? {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ) else {
+            return nil
+        }
+        index.pointee = 0
+        return latexEnvironmentCompletions(for: context.query)
+    }
+
+    override func insertCompletion(
+        _ word: String,
+        forPartialWordRange charRange: NSRange,
+        movement: Int,
+        isFinal flag: Bool
+    ) {
+        if flag,
+           movement != NSTextMovement.cancel.rawValue,
+           latexEnvironmentNames.contains(word),
+           insertLatexEnvironment(word) {
+            return
+        }
+        super.insertCompletion(
+            word,
+            forPartialWordRange: charRange,
+            movement: movement,
+            isFinal: flag
+        )
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -359,11 +412,20 @@ final class CodeTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard closesBracketsAutomatically,
-              modifiers.isEmpty,
+        guard modifiers.isEmpty,
               let characters = event.characters,
               characters.count == 1 else {
             super.keyDown(with: event)
+            return
+        }
+
+        let completionCharacter = characters.first.map {
+            $0.isLetter || $0.isNumber || $0 == "*"
+        } ?? false
+
+        guard closesBracketsAutomatically else {
+            super.keyDown(with: event)
+            requestLatexCompletionIfNeeded(afterTyping: completionCharacter)
             return
         }
 
@@ -398,7 +460,127 @@ final class CodeTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+        requestLatexCompletionIfNeeded(afterTyping: completionCharacter)
     }
+
+    private func requestLatexCompletionIfNeeded(afterTyping eligibleCharacter: Bool) {
+        guard eligibleCharacter else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  let context = latexEnvironmentCompletionContext(
+                    in: self.string,
+                    selection: self.selectedRange()
+                  ),
+                  !context.query.isEmpty,
+                  !latexEnvironmentCompletions(for: context.query).isEmpty else {
+                return
+            }
+            self.complete(nil)
+        }
+    }
+
+    private func acceptLatexEnvironmentCompletion() -> Bool {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ),
+        !context.query.isEmpty,
+        let environment = latexEnvironmentCompletions(for: context.query).first else {
+            return false
+        }
+        return insertLatexEnvironment(environment)
+    }
+
+    private func insertLatexEnvironment(_ environment: String) -> Bool {
+        guard let context = latexEnvironmentCompletionContext(
+            in: string,
+            selection: selectedRange()
+        ) else {
+            return false
+        }
+        let innerIndent = String(repeating: " ", count: max(1, editorTabWidth))
+        let replacement = "\(environment)}\n\(context.lineIndent)\(innerIndent)\n\(context.lineIndent)\\end{\(environment)}"
+        insertText(replacement, replacementRange: context.replacementRange)
+        let cursorOffset = (environment as NSString).length
+            + 2
+            + (context.lineIndent as NSString).length
+            + (innerIndent as NSString).length
+        setSelectedRange(NSRange(
+            location: context.replacementRange.location + cursorOffset,
+            length: 0
+        ))
+        scrollRangeToVisible(selectedRange())
+        return true
+    }
+}
+
+struct LatexEnvironmentCompletionContext: Equatable {
+    let partialRange: NSRange
+    let replacementRange: NSRange
+    let query: String
+    let lineIndent: String
+}
+
+let latexEnvironmentNames = [
+    "equation", "equation*", "align", "align*", "gather", "gather*",
+    "multline", "multline*", "cases", "matrix", "pmatrix", "bmatrix",
+    "theorem", "proof", "definition", "example", "itemize", "enumerate",
+    "figure", "table", "center"
+]
+
+func latexEnvironmentCompletions(for query: String) -> [String] {
+    let normalized = query.lowercased()
+    return latexEnvironmentNames.filter { $0.lowercased().hasPrefix(normalized) }
+}
+
+func latexEnvironmentCompletionContext(
+    in text: String,
+    selection: NSRange
+) -> LatexEnvironmentCompletionContext? {
+    guard selection.length == 0 else { return nil }
+    let source = text as NSString
+    guard selection.location <= source.length else { return nil }
+
+    let lineRange = source.lineRange(for: NSRange(location: selection.location, length: 0))
+    let prefixRange = NSRange(
+        location: lineRange.location,
+        length: selection.location - lineRange.location
+    )
+    let linePrefix = source.substring(with: prefixRange) as NSString
+    guard let expression = try? NSRegularExpression(pattern: #"\\begin\{([A-Za-z*]*)$"#),
+          let match = expression.firstMatch(
+            in: linePrefix as String,
+            range: NSRange(location: 0, length: linePrefix.length)
+          ),
+          match.numberOfRanges == 2 else {
+        return nil
+    }
+
+    let queryRangeInLine = match.range(at: 1)
+    let partialRange = NSRange(
+        location: lineRange.location + queryRangeInLine.location,
+        length: queryRangeInLine.length
+    )
+    let hasClosingBrace = selection.location < source.length
+        && source.substring(with: NSRange(location: selection.location, length: 1)) == "}"
+    let replacementRange = NSRange(
+        location: partialRange.location,
+        length: partialRange.length + (hasClosingBrace ? 1 : 0)
+    )
+
+    let leadingWhitespace = try? NSRegularExpression(pattern: #"^[\t ]*"#)
+        .firstMatch(
+            in: linePrefix as String,
+            range: NSRange(location: 0, length: linePrefix.length)
+        )?.range
+    let lineIndent = leadingWhitespace.map { linePrefix.substring(with: $0) } ?? ""
+
+    return LatexEnvironmentCompletionContext(
+        partialRange: partialRange,
+        replacementRange: replacementRange,
+        query: source.substring(with: partialRange),
+        lineIndent: lineIndent
+    )
 }
 
 private enum SyntaxHighlighter {
