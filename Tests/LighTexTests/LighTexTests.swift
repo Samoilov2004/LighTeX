@@ -52,6 +52,15 @@ struct LighTexTests {
     }
 
     @Test
+    func buildsSyncTeXSourcePositionWithColumn() {
+        let source = URL(fileURLWithPath: "/tmp/My Book/main.tex")
+        #expect(
+            SyncTeXService.sourcePositionArgument(sourceURL: source, line: 17, column: 9)
+                == "17:9:/tmp/My Book/main.tex"
+        )
+    }
+
+    @Test
     func compilesMinimalLatexProject() async throws {
         #expect(try await latexBuildProducesPDF())
     }
@@ -72,7 +81,8 @@ struct LighTexTests {
             autoCloseBrackets: true,
             jumpLine: nil,
             jumpToken: 0,
-            onCursorChange: { _, _ in }
+            onCursorChange: { _, _ in },
+            onWordDoubleClick: { _, _ in }
         )
         let host = NSHostingView(rootView: editor)
         host.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
@@ -86,6 +96,15 @@ struct LighTexTests {
         #expect((textView?.frame.width ?? 0) > 0)
         #expect((textView?.frame.height ?? 0) > 0)
         #expect(textView?.appearance?.name == .aqua)
+        #expect(textView?.textContainerInset.width == 9)
+        #expect(textView?.textContainer?.lineFragmentPadding == 0)
+        #expect(
+            textView?.layoutManager?.temporaryAttribute(
+                .backgroundColor,
+                atCharacterIndex: 0,
+                effectiveRange: nil
+            ) == nil
+        )
     }
 
     @Test @MainActor
@@ -405,6 +424,36 @@ struct LighTexTests {
         model.closeProject()
         #expect(model.hasProject == false)
         #expect(model.recentProjects.map(\.name) == ["EmptyBook"])
+    }
+
+    @Test @MainActor
+    func createsProjectItemsAndReordersEditorTabs() throws {
+        let testDefaults = makeIsolatedDefaults()
+        let settings = AppSettings(defaults: testDefaults)
+        settings.automaticBuilds = false
+        let model = AppModel(settings: settings, defaults: testDefaults)
+        let location = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: location, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: location) }
+
+        #expect(model.createProject(name: "Workspace", location: location))
+        let root = location.appendingPathComponent("Workspace", isDirectory: true)
+        let folder = root.appendingPathComponent("sections", isDirectory: true)
+        #expect(model.createProjectFolder(named: "sections"))
+        #expect(model.projectTree.contains(where: { $0.url == folder && $0.isDirectory }))
+
+        model.navigatorSelection = folder
+        #expect(model.createProjectFile(named: "vectors.tex"))
+        let vectors = folder.appendingPathComponent("vectors.tex")
+        #expect(FileManager.default.fileExists(atPath: vectors.path))
+        #expect(model.selectedDocumentID == vectors)
+
+        let main = root.appendingPathComponent("main.tex")
+        model.moveDocument(main, to: vectors)
+        #expect(model.openDocuments.map(\.url) == [vectors, main])
+        #expect(AppModel.validProjectItemName("../bad") == nil)
+        #expect(AppModel.validProjectItemName(" chapter.tex ") == "chapter.tex")
     }
 }
 

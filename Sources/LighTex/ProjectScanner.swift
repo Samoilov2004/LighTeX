@@ -29,10 +29,6 @@ enum ProjectScanner {
     private static let ignoredDirectories: Set<String> = [
         ".git", ".build", "build", "node_modules", "DerivedData", ".idea"
     ]
-    private static let visibleExtensions: Set<String> = [
-        "tex", "bib", "sty", "cls", "txt", "pdf", "png", "jpg", "jpeg", "svg", "eps"
-    ]
-
     static func projectTree(in projectURL: URL) -> [ProjectItem] {
         children(of: projectURL)
     }
@@ -83,17 +79,13 @@ enum ProjectScanner {
             if values.isDirectory == true {
                 guard !ignoredDirectories.contains(url.lastPathComponent) else { return nil }
                 let nested = children(of: url)
-                return nested.isEmpty ? nil : ProjectItem(
+                return ProjectItem(
                     url: url,
                     isDirectory: true,
                     children: nested
                 )
             }
-
-            guard values.isRegularFile == true,
-                  visibleExtensions.contains(url.pathExtension.lowercased()) else {
-                return nil
-            }
+            guard values.isRegularFile == true else { return nil }
             return ProjectItem(url: url, isDirectory: false, children: nil)
         }
         .sorted { lhs, rhs in

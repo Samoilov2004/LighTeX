@@ -11,6 +11,7 @@ struct SourceEditor: NSViewRepresentable {
     let jumpLine: Int?
     let jumpToken: Int
     let onCursorChange: (Int, Int) -> Void
+    let onWordDoubleClick: (Int, Int) -> Void
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -78,23 +79,13 @@ struct SourceEditor: NSViewRepresentable {
                 lastCursorColumn = safeColumn
                 parent.onCursorChange(line, safeColumn)
             }
-            applyStructuralHighlights(to: textView)
+            applyBracketHighlights(to: textView)
         }
 
-        func applyStructuralHighlights(to textView: CodeTextView) {
+        func applyBracketHighlights(to textView: CodeTextView) {
             guard let layoutManager = textView.layoutManager else { return }
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
-
-            let lineRange = (textView.string as NSString).lineRange(for: NSRange(
-                location: min(textView.selectedRange().location, fullRange.length),
-                length: 0
-            ))
-            layoutManager.addTemporaryAttribute(
-                .backgroundColor,
-                value: NSColor.selectedContentBackgroundColor.withAlphaComponent(0.055),
-                forCharacterRange: lineRange
-            )
 
             for range in matchingBracketRanges(in: textView.string, cursor: textView.selectedRange().location) {
                 layoutManager.addTemporaryAttribute(
@@ -103,6 +94,10 @@ struct SourceEditor: NSViewRepresentable {
                     forCharacterRange: range
                 )
             }
+        }
+
+        func wordDoubleClicked(line: Int, column: Int) {
+            parent.onWordDoubleClick(line, column)
         }
 
         func jumpIfNeeded(in textView: CodeTextView) {
@@ -179,6 +174,9 @@ struct SourceEditor: NSViewRepresentable {
 
         textView.appearance = NSAppearance(named: .aqua)
         textView.delegate = context.coordinator
+        textView.onWordDoubleClick = { [weak coordinator = context.coordinator] line, column in
+            coordinator?.wordDoubleClicked(line: line, column: column)
+        }
         configure(textView)
         textView.string = text
         textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -276,7 +274,8 @@ struct SourceEditor: NSViewRepresentable {
         textView.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         textView.backgroundColor = .white
         textView.insertionPointColor = NSColor(calibratedWhite: 0.12, alpha: 1)
-        textView.textContainerInset = NSSize(width: 14, height: 16)
+        textView.textContainerInset = NSSize(width: 9, height: 14)
+        textView.textContainer?.lineFragmentPadding = 0
         textView.editorFont = NSFont(name: "SFMono-Regular", size: fontSize)
             ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.font = textView.editorFont
@@ -309,6 +308,7 @@ final class CodeTextView: NSTextView {
     var closesBracketsAutomatically = true
     var editorFont = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
     var opensAtDocumentStart = false
+    var onWordDoubleClick: ((Int, Int) -> Void)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -329,6 +329,30 @@ final class CodeTextView: NSTextView {
 
     override func insertTab(_ sender: Any?) {
         insertText(String(repeating: " ", count: editorTabWidth), replacementRange: selectedRange())
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard event.clickCount == 2 else { return }
+
+        let selection = selectedRange()
+        let text = string as NSString
+        guard selection.length > 0,
+              NSMaxRange(selection) <= text.length,
+              !text.substring(with: selection).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        let location = min(selection.location, text.length)
+        let prefix = text.substring(to: location)
+        let line = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        let column: Int
+        if let newline = prefix.lastIndex(of: "\n") {
+            column = prefix.distance(from: newline, to: prefix.endIndex)
+        } else {
+            column = location + 1
+        }
+        onWordDoubleClick?(line, max(1, column))
     }
 
     override func keyDown(with event: NSEvent) {
@@ -425,7 +449,7 @@ final class LineNumberRulerView: NSRulerView {
         self.textView = textView
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
-        ruleThickness = 44
+        ruleThickness = 40
     }
 
     required init(coder: NSCoder) {
@@ -500,7 +524,7 @@ final class LineNumberRulerView: NSRulerView {
         let text = "\(number)" as NSString
         let size = text.size(withAttributes: attributes)
         text.draw(
-            at: NSPoint(x: ruleThickness - size.width - 9, y: y),
+            at: NSPoint(x: ruleThickness - size.width - 8, y: y),
             withAttributes: attributes
         )
     }

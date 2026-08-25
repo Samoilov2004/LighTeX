@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
@@ -465,6 +466,7 @@ private struct WorkspaceView: View {
 
 private struct ProjectNavigator: View {
     @EnvironmentObject private var model: AppModel
+    @State private var creationKind: ProjectItemCreationKind?
 
     var body: some View {
         VSplitView {
@@ -475,72 +477,114 @@ private struct ProjectNavigator: View {
                 .frame(minHeight: 120, idealHeight: 220)
         }
         .background(LighTexTheme.sidebarBackground)
+        .sheet(item: $creationKind) { kind in
+            ProjectItemCreationSheet(kind: kind) { name in
+                switch kind {
+                case .file:
+                    model.createProjectFile(named: name)
+                case .folder:
+                    model.createProjectFolder(named: name)
+                }
+            }
+        }
     }
 
-    @ViewBuilder
     private var projectFiles: some View {
-        if model.projectTree.isEmpty {
-            VStack(spacing: 7) {
-                Image(systemName: "doc")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.tertiary)
-                Text("No supported files")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Add a .tex file and refresh the project.")
-                    .font(.system(size: 11))
+        VStack(spacing: 0) {
+            HStack(spacing: 3) {
+                Text("FILES")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+
+                Spacer()
+
+                ProjectNavigatorActionButton(
+                    title: "Create File",
+                    systemImage: "doc.badge.plus"
+                ) {
+                    creationKind = .file
+                }
+                ProjectNavigatorActionButton(
+                    title: "Create Folder",
+                    systemImage: "folder.badge.plus"
+                ) {
+                    creationKind = .folder
+                }
+                ProjectNavigatorActionButton(
+                    title: "Upload File",
+                    systemImage: "square.and.arrow.up"
+                ) {
+                    model.importProjectFiles()
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(20)
-        } else {
-            List(selection: $model.navigatorSelection) {
-                OutlineGroup(model.projectTree, children: \.children) { item in
-                    HStack(spacing: 6) {
-                        Image(systemName: item.iconName)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16)
-                        Text(item.name)
-                            .font(.system(size: 12.5))
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        if item.url == model.entryFileURL {
-                            Text("MAIN")
-                                .font(.system(size: 8, weight: .semibold))
+            .padding(.horizontal, 9)
+            .frame(height: 34)
+
+            Divider()
+
+            if model.projectTree.isEmpty {
+                VStack(spacing: 7) {
+                    Image(systemName: "doc.badge.plus")
+                        .font(.system(size: 21))
+                        .foregroundStyle(.tertiary)
+                    Text("No files yet")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Create a file or add one from your Mac.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(20)
+            } else {
+                List(selection: $model.navigatorSelection) {
+                    OutlineGroup(model.projectTree, children: \.children) { item in
+                        HStack(spacing: 6) {
+                            Image(systemName: item.iconName)
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                            Text(item.name)
+                                .font(.system(size: 12.5))
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            if item.url == model.entryFileURL {
+                                Text("MAIN")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                    .tag(item.url)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if !item.isDirectory {
-                            model.activateNavigatorItem(item.url)
-                        }
-                    }
-                    .contextMenu {
-                        if !item.isDirectory {
-                            Button("Open") {
+                        .tag(item.url)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if !item.isDirectory {
                                 model.activateNavigatorItem(item.url)
                             }
-                            if item.url.pathExtension.lowercased() == "tex" {
-                                Button("Use as Main Document") {
-                                    model.setEntryFile(item.url)
-                                }
-                            }
-                            Divider()
                         }
-                        Button("Reveal in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                        .contextMenu {
+                            if !item.isDirectory {
+                                Button("Open") {
+                                    model.activateNavigatorItem(item.url)
+                                }
+                                if item.url.pathExtension.lowercased() == "tex" {
+                                    Button("Use as Main Document") {
+                                        model.setEntryFile(item.url)
+                                    }
+                                }
+                                Divider()
+                            }
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                            }
                         }
                     }
                 }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .onChange(of: model.navigatorSelection) { _, selection in
-                if let selection {
-                    model.activateNavigatorItem(selection)
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .onChange(of: model.navigatorSelection) { _, selection in
+                    if let selection {
+                        model.activateNavigatorItem(selection)
+                    }
                 }
             }
         }
@@ -548,7 +592,11 @@ private struct ProjectNavigator: View {
 
     private var documentOutline: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.indent")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
                 Text("OUTLINE")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -564,47 +612,164 @@ private struct ProjectNavigator: View {
                 .accessibilityLabel("Refresh files and outline")
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: 34)
 
             Divider()
 
             if model.outlineItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 6) {
+                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.tertiary)
                     Text("No sections yet")
                         .font(.system(size: 12, weight: .medium))
                     Text("Chapters and sections will appear here.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(16)
             } else {
                 List(model.outlineItems) { item in
                     Button {
                         model.openOutlineItem(item)
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "text.alignleft")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 12)
-                            Text(item.title)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                        }
-                        .padding(.leading, CGFloat(item.level) * 11)
-                        .contentShape(Rectangle())
+                        OutlineNavigatorRow(item: item)
                     }
                     .buttonStyle(.plain)
                     .help("\(item.fileURL.lastPathComponent), line \(item.line)")
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
         .background(LighTexTheme.sidebarBackground)
+    }
+}
+
+private enum ProjectItemCreationKind: String, Identifiable {
+    case file
+    case folder
+
+    var id: String { rawValue }
+    var title: String { self == .file ? "Create File" : "Create Folder" }
+    var prompt: String { self == .file ? "File Name" : "Folder Name" }
+    var defaultName: String { self == .file ? "untitled.tex" : "New Folder" }
+    var icon: String { self == .file ? "doc.badge.plus" : "folder.badge.plus" }
+}
+
+private struct ProjectItemCreationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let kind: ProjectItemCreationKind
+    let onCreate: (String) -> Bool
+    @State private var name: String
+    @FocusState private var nameIsFocused: Bool
+
+    init(kind: ProjectItemCreationKind, onCreate: @escaping (String) -> Bool) {
+        self.kind = kind
+        self.onCreate = onCreate
+        _name = State(initialValue: kind.defaultName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 9) {
+                Image(systemName: kind.icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(kind.title)
+                    .font(.system(size: 17, weight: .semibold))
+            }
+
+            TextField(kind.prompt, text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameIsFocused)
+                .accessibilityLabel(kind.prompt)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Create") {
+                    if onCreate(name) {
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear {
+            nameIsFocused = true
+        }
+    }
+}
+
+private struct ProjectNavigatorActionButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12.5, weight: .medium))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct OutlineNavigatorRow: View {
+    let item: DocumentOutlineItem
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if item.level == 0 {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.72))
+                    .frame(width: 2, height: 15)
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(item.level == 1 ? 0.55 : 0.32))
+                    .frame(width: 4, height: 4)
+            }
+
+            Text(item.title)
+                .font(.system(
+                    size: item.level == 0 ? 12.5 : 12,
+                    weight: item.level == 0 ? .medium : .regular
+                ))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.leading, 8 + CGFloat(item.level) * 13)
+        .padding(.trailing, 8)
+        .frame(minHeight: 29)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isHovering ? LighTexTheme.hover : .clear)
+                .padding(.horizontal, 4)
+        )
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -629,7 +794,10 @@ private struct EditorWorkspace: View {
                     autoCloseBrackets: settings.autoCloseBrackets,
                     jumpLine: document.jumpLine,
                     jumpToken: document.jumpToken,
-                    onCursorChange: model.updateCursor
+                    onCursorChange: model.updateCursor,
+                    onWordDoubleClick: { line, column in
+                        model.jumpPDF(toSource: document.url, line: line, column: column)
+                    }
                 )
                 .id(document.id)
             } else {
@@ -646,6 +814,8 @@ private struct EditorWorkspace: View {
 
 private struct EditorTabBar: View {
     @EnvironmentObject private var model: AppModel
+    @State private var draggedDocumentID: URL?
+    @State private var dropTargetID: URL?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -654,7 +824,9 @@ private struct EditorTabBar: View {
                     ForEach(model.openDocuments) { document in
                         EditorTab(
                             document: document,
-                            isActive: document.id == model.selectedDocumentID
+                            isActive: document.id == model.selectedDocumentID,
+                            draggedDocumentID: $draggedDocumentID,
+                            dropTargetID: $dropTargetID
                         )
                     }
                 }
@@ -691,6 +863,8 @@ private struct EditorTab: View {
     @EnvironmentObject private var model: AppModel
     let document: EditorDocument
     let isActive: Bool
+    @Binding var draggedDocumentID: URL?
+    @Binding var dropTargetID: URL?
     @State private var isHovering = false
 
     var body: some View {
@@ -734,13 +908,80 @@ private struct EditorTab: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 34)
-        .background(isActive ? Color.white : (isHovering ? LighTexTheme.hover : .clear))
+        .background(
+            dropTargetID == document.id
+                ? Color.accentColor.opacity(0.10)
+                : (isActive ? Color.white : (isHovering ? LighTexTheme.hover : .clear))
+        )
         .overlay(alignment: .trailing) {
             Rectangle()
                 .fill(LighTexTheme.divider)
                 .frame(width: 1)
         }
         .onHover { isHovering = $0 }
+        .onDrag {
+            draggedDocumentID = document.id
+            return NSItemProvider(object: document.url.path as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: EditorTabDropDelegate(
+                targetDocumentID: document.id,
+                draggedDocumentID: $draggedDocumentID,
+                dropTargetID: $dropTargetID,
+                model: model
+            )
+        )
+        .contextMenu {
+            if let index = model.openDocuments.firstIndex(where: { $0.id == document.id }) {
+                Button("Move Tab Left") {
+                    guard index > 0 else { return }
+                    model.moveDocument(document.id, to: model.openDocuments[index - 1].id)
+                }
+                .disabled(index == 0)
+
+                Button("Move Tab Right") {
+                    guard index + 1 < model.openDocuments.count else { return }
+                    model.moveDocument(document.id, to: model.openDocuments[index + 1].id)
+                }
+                .disabled(index + 1 == model.openDocuments.count)
+
+                Divider()
+            }
+
+            Button("Close Tab") {
+                model.closeDocument(document.url)
+            }
+        }
+    }
+}
+
+private struct EditorTabDropDelegate: DropDelegate {
+    let targetDocumentID: URL
+    @Binding var draggedDocumentID: URL?
+    @Binding var dropTargetID: URL?
+    let model: AppModel
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedDocumentID, draggedDocumentID != targetDocumentID else { return }
+        dropTargetID = targetDocumentID
+        model.moveDocument(draggedDocumentID, to: targetDocumentID)
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetID == targetDocumentID {
+            dropTargetID = nil
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedDocumentID = nil
+        dropTargetID = nil
+        return true
     }
 }
 
