@@ -226,20 +226,21 @@ struct LighTexTests {
     }
 
     @Test
-    func verticallyCentersLineNumbersInsideEditorLines() {
+    func alignsLineNumbersToTheSourceTextBaseline() {
         #expect(
-            centeredLineNumberOriginY(
+            estimatedTextBaselineY(
                 lineTop: 10,
-                lineHeight: 18,
-                textHeight: 12
-            ) == 13
+                lineHeight: 20,
+                fontAscender: 11,
+                fontDescender: -3,
+                fontLeading: 0
+            ) == 24
         )
         #expect(
-            centeredLineNumberOriginY(
-                lineTop: 10,
-                lineHeight: 10,
-                textHeight: 12
-            ) == 10
+            lineNumberOriginY(
+                sourceBaselineY: 24,
+                numberFontAscender: 8
+            ) == 16
         )
     }
 

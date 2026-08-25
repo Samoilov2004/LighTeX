@@ -39,7 +39,7 @@ This file is the visual source of truth for the native macOS application.
 - PDF minimum: 320 pt; user can hide it when width is constrained.
 - Panels are separated by draggable native split dividers, not cards.
 - Source text uses a compact 6 pt horizontal and 8 pt vertical inset from its gutter, matching dense web-based code editors.
-- Line numbers are vertically centered in the exact TextKit line fragment used by their source line.
+- Line numbers share the exact TextKit glyph baseline used by their source line, including while editing.
 
 ## Components
 
