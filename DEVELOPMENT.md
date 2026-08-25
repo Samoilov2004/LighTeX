@@ -56,6 +56,10 @@ into signed-manifest parts below 2 GiB. LighTex downloads the parts in order,
 reassembles the ZIP locally, and verifies the complete archive SHA-256 before
 installation.
 
+The runtime workflow can also republish assets from an earlier completed run
+through its optional `source_run_id` input. This is useful when only manifest or
+release packaging logic changes, because TeX Live does not need to be rebuilt.
+
 The preview runtime executables are ad-hoc signed, but are not Developer ID
 signed or notarized yet. Archive integrity remains protected by the signed
 manifest and SHA-256 hashes.
