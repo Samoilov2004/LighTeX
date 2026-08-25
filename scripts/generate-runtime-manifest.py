@@ -16,7 +16,17 @@ assets = []
 for path in sorted(args.metadata_directory.glob("*.metadata.json")):
     item = json.loads(path.read_text())
     archive_name = item.pop("archiveName")
-    item["downloadURL"] = f"{args.release_base_url.rstrip('/')}/{archive_name}"
+    archive_parts = item.pop("archiveParts", [])
+    if archive_parts:
+        item["downloadParts"] = [
+            {
+                "downloadURL": f"{args.release_base_url.rstrip('/')}/{part['archiveName']}",
+                "compressedSize": part["compressedSize"],
+            }
+            for part in archive_parts
+        ]
+    else:
+        item["downloadURL"] = f"{args.release_base_url.rstrip('/')}/{archive_name}"
     assets.append(item)
 
 if len(assets) != 6:

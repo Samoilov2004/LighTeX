@@ -103,7 +103,7 @@ jobs:
               --prerelease \
               --notes "Managed TeX Live runtime assets for the first preview. Executables use an ad-hoc signature; archive integrity is protected by the signed manifest and SHA-256 hashes."
           gh release upload runtime-latest \
-            runtime-assets/*.zip \
+            runtime-assets/*.zip* \
             runtime-assets/runtime-manifest.json \
             runtime-assets/runtime-manifest.sig \
             --clobber

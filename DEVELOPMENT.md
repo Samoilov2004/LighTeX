@@ -51,6 +51,11 @@ metadata. `.github/workflows/runtime-release.yml` builds Minimal, Standard, and
 Full for `arm64` and `x86_64`, signs the manifest with Ed25519, and publishes it
 under the stable `runtime-latest` tag.
 
+Full runtime archives that exceed GitHub's per-file release limit are split
+into signed-manifest parts below 2 GiB. LighTex downloads the parts in order,
+reassembles the ZIP locally, and verifies the complete archive SHA-256 before
+installation.
+
 The preview runtime executables are ad-hoc signed, but are not Developer ID
 signed or notarized yet. Archive integrity remains protected by the signed
 manifest and SHA-256 hashes.
