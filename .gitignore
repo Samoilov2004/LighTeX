@@ -1,0 +1,15 @@
+.build/
+dist/
+.DS_Store
+Resources/AppIcon.iconset/
+runtime-output/
+
+# Signing credentials must never enter the repository.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
