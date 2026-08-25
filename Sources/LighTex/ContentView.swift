@@ -859,29 +859,37 @@ private struct EditorTabBar: View {
     @State private var dropIndicator: EditorTabDropIndicator?
     @State private var fileDropTargetID: URL?
     @State private var isFileDropTarget = false
+    @State private var localDragEndMonitor: Any?
+    @State private var globalDragEndMonitor: Any?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ForEach(Array(model.openDocuments.enumerated()), id: \.element.id) { index, document in
+                let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
+                ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
                     let isActive = document.id == model.selectedDocumentID
-                    let nextIsActive = model.openDocuments.indices.contains(index + 1)
-                        && model.openDocuments[index + 1].id == model.selectedDocumentID
+                    let nextIsActive = visibleDocuments.indices.contains(index + 1)
+                        && visibleDocuments[index + 1].id == model.selectedDocumentID
                     EditorTab(
                         document: document,
                         isActive: isActive,
                         showsTrailingSeparator: !isActive
                             && !nextIsActive
-                            && index < model.openDocuments.count - 1,
+                            && index < visibleDocuments.count - 1,
                         draggedDocumentID: $draggedDocumentID,
                         dropIndicator: $dropIndicator,
-                        fileDropTargetID: $fileDropTargetID
+                        fileDropTargetID: $fileDropTargetID,
+                        onDragBegan: beginTabDrag
                     )
                 }
             }
             .animation(
                 reduceMotion ? nil : .easeInOut(duration: 0.12),
                 value: model.openDocuments.map(\.id)
+            )
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.12),
+                value: draggedDocumentID
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -900,6 +908,58 @@ private struct EditorTabBar: View {
             )
         )
         .accessibilityLabel("Open editor tabs")
+        .onChange(of: draggedDocumentID) { _, documentID in
+            if documentID == nil {
+                removeDragEndMonitors()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            finishTabDrag()
+        }
+        .onDisappear {
+            finishTabDrag()
+        }
+    }
+
+    private func beginTabDrag(_ documentID: URL) {
+        draggedDocumentID = documentID
+        guard localDragEndMonitor == nil, globalDragEndMonitor == nil else { return }
+
+        localDragEndMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseUp, .keyDown]
+        ) { event in
+            let finishesDrag = event.type == .leftMouseUp
+                || (event.type == .keyDown && event.keyCode == 53)
+            if finishesDrag {
+                DispatchQueue.main.async {
+                    finishTabDrag()
+                }
+            }
+            return event
+        }
+
+        globalDragEndMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { _ in
+            DispatchQueue.main.async {
+                finishTabDrag()
+            }
+        }
+    }
+
+    private func finishTabDrag() {
+        draggedDocumentID = nil
+        dropIndicator = nil
+        removeDragEndMonitors()
+    }
+
+    private func removeDragEndMonitors() {
+        if let localDragEndMonitor {
+            NSEvent.removeMonitor(localDragEndMonitor)
+            self.localDragEndMonitor = nil
+        }
+        if let globalDragEndMonitor {
+            NSEvent.removeMonitor(globalDragEndMonitor)
+            self.globalDragEndMonitor = nil
+        }
     }
 }
 
@@ -911,6 +971,7 @@ private struct EditorTab: View {
     @Binding var draggedDocumentID: URL?
     @Binding var dropIndicator: EditorTabDropIndicator?
     @Binding var fileDropTargetID: URL?
+    let onDragBegan: (URL) -> Void
     @State private var isHovering = false
     @State private var tabWidth: CGFloat = 1
     @FocusState private var isSelectionFocused: Bool
@@ -941,7 +1002,7 @@ private struct EditorTab: View {
                 model.selectDocument(document.url)
             }
             .onDrag {
-                draggedDocumentID = document.id
+                onDragBegan(document.id)
                 return NSItemProvider(
                     item: document.url.path as NSString,
                     typeIdentifier: UTType.lighTexEditorTab.identifier
