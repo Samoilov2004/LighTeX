@@ -805,6 +805,7 @@ private struct EditorWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             EditorTabBar()
+                .zIndex(1)
 
             if let document = model.selectedDocument {
                 SourceEditor(
@@ -825,6 +826,7 @@ private struct EditorWorkspace: View {
                     }
                 )
                 .id(document.id)
+                .clipped()
             } else {
                 EmptyWorkspaceState(
                     icon: "doc.text",
@@ -851,6 +853,7 @@ private struct EditorTabWidthPreferenceKey: PreferenceKey {
 }
 
 private struct EditorTabBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
     @State private var draggedDocumentID: URL?
     @State private var dropIndicator: EditorTabDropIndicator?
@@ -876,6 +879,10 @@ private struct EditorTabBar: View {
                     )
                 }
             }
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.12),
+                value: model.openDocuments.map(\.id)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -939,6 +946,8 @@ private struct EditorTab: View {
                     item: document.url.path as NSString,
                     typeIdentifier: UTType.lighTexEditorTab.identifier
                 )
+            } preview: {
+                EditorTabDragPreview(document: document)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(document.isDirty
@@ -1073,6 +1082,48 @@ private struct EditorTab: View {
             return .leading
         }
         return dropIndicator.placement == .before ? .leading : .trailing
+    }
+}
+
+private struct EditorTabDragPreview: View {
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: document.url.pathExtension.lowercased() == "bib" ? "books.vertical" : "doc.plaintext")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            Text(document.displayName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            if document.isDirty {
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+            }
+
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.58), lineWidth: 1)
+        }
+        .accessibilityLabel("Moving \(document.displayName)")
     }
 }
 

@@ -188,6 +188,8 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .white
+        scrollView.wantsLayer = true
+        scrollView.layer?.masksToBounds = true
         scrollView.contentView.postsBoundsChangedNotifications = true
 
         let ruler = LineNumberRulerView(textView: textView, scrollView: scrollView)
