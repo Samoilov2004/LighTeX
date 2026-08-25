@@ -431,6 +431,24 @@ final class AppModel: ObservableObject {
         persistOpenDocuments()
     }
 
+    func moveDocumentToEnd(_ url: URL) {
+        guard let index = openDocuments.firstIndex(where: { $0.url == url }),
+              index != openDocuments.indices.last else {
+            return
+        }
+        let document = openDocuments.remove(at: index)
+        openDocuments.append(document)
+        persistOpenDocuments()
+    }
+
+    func openDroppedProjectItem(atPath path: String) {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard let item = findProjectItem(url: url, in: projectTree), !item.isDirectory else {
+            return
+        }
+        activateNavigatorItem(url)
+    }
+
     func createProjectFile(named name: String) -> Bool {
         guard let name = Self.validProjectItemName(name),
               let directory = selectedProjectDirectory else {

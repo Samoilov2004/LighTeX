@@ -452,6 +452,10 @@ struct LighTexTests {
         let main = root.appendingPathComponent("main.tex")
         model.moveDocument(main, to: vectors)
         #expect(model.openDocuments.map(\.url) == [vectors, main])
+        model.moveDocumentToEnd(vectors)
+        #expect(model.openDocuments.map(\.url) == [main, vectors])
+        model.openDroppedProjectItem(atPath: main.path)
+        #expect(model.selectedDocumentID == main)
         #expect(AppModel.validProjectItemName("../bad") == nil)
         #expect(AppModel.validProjectItemName(" chapter.tex ") == "chapter.tex")
     }

@@ -539,21 +539,10 @@ private struct ProjectNavigator: View {
             } else {
                 List(selection: $model.navigatorSelection) {
                     OutlineGroup(model.projectTree, children: \.children) { item in
-                        HStack(spacing: 6) {
-                            Image(systemName: item.iconName)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 16)
-                            Text(item.name)
-                                .font(.system(size: 12.5))
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            if item.url == model.entryFileURL {
-                                Text("MAIN")
-                                    .font(.system(size: 8, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        ProjectFileTreeRow(
+                            item: item,
+                            isMainDocument: item.url == model.entryFileURL
+                        )
                         .tag(item.url)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -734,6 +723,45 @@ private struct ProjectNavigatorActionButton: View {
     }
 }
 
+private struct ProjectFileTreeRow: View {
+    let item: ProjectItem
+    let isMainDocument: Bool
+
+    @ViewBuilder
+    var body: some View {
+        if item.isDirectory {
+            row
+        } else {
+            row
+                .onDrag {
+                    NSItemProvider(
+                        item: item.url.path as NSString,
+                        typeIdentifier: UTType.lighTexProjectFile.identifier
+                    )
+                }
+                .help("Drag to the tab bar to open \(item.name)")
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.iconName)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(item.name)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if isMainDocument {
+                Text("MAIN")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 private struct OutlineNavigatorRow: View {
     let item: DocumentOutlineItem
     @State private var isHovering = false
@@ -816,46 +844,39 @@ private struct EditorTabBar: View {
     @EnvironmentObject private var model: AppModel
     @State private var draggedDocumentID: URL?
     @State private var dropTargetID: URL?
+    @State private var isFileDropTarget = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(model.openDocuments) { document in
-                        EditorTab(
-                            document: document,
-                            isActive: document.id == model.selectedDocumentID,
-                            draggedDocumentID: $draggedDocumentID,
-                            dropTargetID: $dropTargetID
-                        )
-                    }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(model.openDocuments) { document in
+                    EditorTab(
+                        document: document,
+                        isActive: document.id == model.selectedDocumentID,
+                        draggedDocumentID: $draggedDocumentID,
+                        dropTargetID: $dropTargetID
+                    )
                 }
-            }
-
-            if model.openDocuments.count > 1 {
-                Menu {
-                    ForEach(model.openDocuments) { document in
-                        Button {
-                            model.selectDocument(document.url)
-                        } label: {
-                            if document.id == model.selectedDocumentID {
-                                Label(document.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(document.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .frame(width: 28, height: 28)
-                }
-                .menuStyle(.borderlessButton)
-                .help("Show open files")
-                .accessibilityLabel("Show open files")
             }
         }
-        .background(LighTexTheme.secondaryBackground)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            isFileDropTarget
+                ? Color.accentColor.opacity(0.07)
+                : LighTexTheme.secondaryBackground
+        )
         .frame(height: 34)
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [.lighTexEditorTab, .lighTexProjectFile],
+            delegate: EditorTabBarDropDelegate(
+                draggedDocumentID: $draggedDocumentID,
+                dropTargetID: $dropTargetID,
+                isFileDropTarget: $isFileDropTarget,
+                model: model
+            )
+        )
+        .accessibilityLabel("Open editor tabs")
     }
 }
 
@@ -868,7 +889,7 @@ private struct EditorTab: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 0) {
             Button {
                 model.selectDocument(document.url)
             } label: {
@@ -887,9 +908,20 @@ private struct EditorTab: View {
                             .accessibilityLabel("Unsaved changes")
                     }
                 }
+                .padding(.leading, 10)
+                .padding(.trailing, 7)
+                .frame(height: 34)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onDrag {
+                draggedDocumentID = document.id
+                return NSItemProvider(
+                    item: document.url.path as NSString,
+                    typeIdentifier: UTType.lighTexEditorTab.identifier
+                )
+            }
+            .help("Select or drag \(document.displayName)")
 
             Button {
                 model.closeDocument(document.url)
@@ -904,9 +936,8 @@ private struct EditorTab: View {
             .opacity(isActive || isHovering ? 1 : 0)
             .help("Close \(document.displayName)")
             .accessibilityLabel("Close \(document.displayName)")
+            .padding(.trailing, 6)
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 6)
         .frame(height: 34)
         .background(
             dropTargetID == document.id
@@ -919,12 +950,8 @@ private struct EditorTab: View {
                 .frame(width: 1)
         }
         .onHover { isHovering = $0 }
-        .onDrag {
-            draggedDocumentID = document.id
-            return NSItemProvider(object: document.url.path as NSString)
-        }
         .onDrop(
-            of: [UTType.text],
+            of: [.lighTexEditorTab, .lighTexProjectFile],
             delegate: EditorTabDropDelegate(
                 targetDocumentID: document.id,
                 draggedDocumentID: $draggedDocumentID,
@@ -963,7 +990,15 @@ private struct EditorTabDropDelegate: DropDelegate {
     let model: AppModel
 
     func dropEntered(info: DropInfo) {
-        guard let draggedDocumentID, draggedDocumentID != targetDocumentID else { return }
+        if info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier]) {
+            dropTargetID = targetDocumentID
+            return
+        }
+        guard info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
+              let draggedDocumentID,
+              draggedDocumentID != targetDocumentID else {
+            return
+        }
         dropTargetID = targetDocumentID
         model.moveDocument(draggedDocumentID, to: targetDocumentID)
     }
@@ -975,14 +1010,85 @@ private struct EditorTabDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        DropProposal(
+            operation: info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier])
+                ? .copy
+                : .move
+        )
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        if info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier]) {
+            draggedDocumentID = nil
+            dropTargetID = nil
+            return openDroppedProjectItem(from: info, model: model)
+        }
         draggedDocumentID = nil
         dropTargetID = nil
         return true
     }
+}
+
+private struct EditorTabBarDropDelegate: DropDelegate {
+    @Binding var draggedDocumentID: URL?
+    @Binding var dropTargetID: URL?
+    @Binding var isFileDropTarget: Bool
+    let model: AppModel
+
+    func dropEntered(info: DropInfo) {
+        isFileDropTarget = info.hasItemsConforming(to: [UTType.lighTexProjectFile.identifier])
+    }
+
+    func dropExited(info: DropInfo) {
+        isFileDropTarget = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]) {
+            return DropProposal(operation: .move)
+        }
+        return DropProposal(operation: .copy)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            draggedDocumentID = nil
+            dropTargetID = nil
+            isFileDropTarget = false
+        }
+
+        if info.hasItemsConforming(to: [UTType.lighTexEditorTab.identifier]),
+           let draggedDocumentID {
+            model.moveDocumentToEnd(draggedDocumentID)
+            return true
+        }
+        return openDroppedProjectItem(from: info, model: model)
+    }
+}
+
+private func openDroppedProjectItem(from info: DropInfo, model: AppModel) -> Bool {
+    guard let provider = info.itemProviders(
+        for: [UTType.lighTexProjectFile.identifier]
+    ).first else {
+        return false
+    }
+
+    provider.loadItem(
+        forTypeIdentifier: UTType.lighTexProjectFile.identifier,
+        options: nil
+    ) { item, _ in
+        let path = (item as? String) ?? (item as? NSString).map(String.init)
+        guard let path else { return }
+        Task { @MainActor in
+            model.openDroppedProjectItem(atPath: path)
+        }
+    }
+    return true
+}
+
+private extension UTType {
+    static let lighTexEditorTab = UTType(exportedAs: "app.lightex.editor-tab")
+    static let lighTexProjectFile = UTType(exportedAs: "app.lightex.project-file")
 }
 
 private struct PDFWorkspace: View {
