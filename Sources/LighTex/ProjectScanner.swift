@@ -1,0 +1,110 @@
+import Foundation
+
+struct ProjectItem: Identifiable, Hashable {
+    let url: URL
+    let isDirectory: Bool
+    let children: [ProjectItem]?
+
+    var id: URL { url }
+    var name: String { url.lastPathComponent }
+
+    var iconName: String {
+        if isDirectory { return "folder" }
+        switch url.pathExtension.lowercased() {
+        case "tex": return "doc.plaintext"
+        case "bib": return "books.vertical"
+        case "sty", "cls": return "doc.badge.gearshape"
+        case "pdf": return "doc.richtext"
+        case "png", "jpg", "jpeg", "svg", "eps": return "photo"
+        default: return "doc"
+        }
+    }
+
+    var isEditableText: Bool {
+        ["tex", "bib", "sty", "cls", "txt"].contains(url.pathExtension.lowercased())
+    }
+}
+
+enum ProjectScanner {
+    private static let ignoredDirectories: Set<String> = [
+        ".git", ".build", "build", "node_modules", "DerivedData", ".idea"
+    ]
+    private static let visibleExtensions: Set<String> = [
+        "tex", "bib", "sty", "cls", "txt", "pdf", "png", "jpg", "jpeg", "svg", "eps"
+    ]
+
+    static func projectTree(in projectURL: URL) -> [ProjectItem] {
+        children(of: projectURL)
+    }
+
+    static func texFiles(in projectURL: URL) -> [URL] {
+        flatten(projectTree(in: projectURL))
+            .filter { !$0.isDirectory && $0.url.pathExtension.lowercased() == "tex" }
+            .map(\.url)
+    }
+
+    static func preferredEntryPoint(from files: [URL]) -> URL? {
+        if let main = files.first(where: { $0.lastPathComponent.lowercased() == "main.tex" }) {
+            return main
+        }
+
+        if let document = files.first(where: {
+            (try? String(contentsOf: $0, encoding: .utf8))?.contains("\\documentclass") == true
+        }) {
+            return document
+        }
+
+        return files.first
+    }
+
+    static func relativePath(for fileURL: URL, inside projectURL: URL) -> String {
+        let root = projectURL.standardizedFileURL.path
+        let file = fileURL.standardizedFileURL.path
+        guard file.hasPrefix(root + "/") else { return fileURL.lastPathComponent }
+        return String(file.dropFirst(root.count + 1))
+    }
+
+    private static func children(of directory: URL) -> [ProjectItem] {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isHiddenKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return urls.compactMap { url -> ProjectItem? in
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isHidden != true else {
+                return nil
+            }
+
+            if values.isDirectory == true {
+                guard !ignoredDirectories.contains(url.lastPathComponent) else { return nil }
+                let nested = children(of: url)
+                return nested.isEmpty ? nil : ProjectItem(
+                    url: url,
+                    isDirectory: true,
+                    children: nested
+                )
+            }
+
+            guard values.isRegularFile == true,
+                  visibleExtensions.contains(url.pathExtension.lowercased()) else {
+                return nil
+            }
+            return ProjectItem(url: url, isDirectory: false, children: nil)
+        }
+        .sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private static func flatten(_ items: [ProjectItem]) -> [ProjectItem] {
+        items.flatMap { item in
+            [item] + flatten(item.children ?? [])
+        }
+    }
+}
