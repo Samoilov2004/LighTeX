@@ -238,6 +238,33 @@ struct LighTexTests {
     }
 
     @Test
+    func preservesTeXFormatSymlinkName() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let target = temporary.appendingPathComponent("pdftex")
+        try "#!/bin/sh\necho 'pdfTeX fixture 1.0'\n".write(
+            to: target,
+            atomically: true,
+            encoding: .utf8
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: target.path
+        )
+        let symlink = temporary.appendingPathComponent("pdflatex")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+
+        let status = ToolchainService.detectSystemSynchronously(
+            environment: ["PATH": temporary.path]
+        )
+
+        #expect(status.engines[.pdfLaTeX]?.url.lastPathComponent == "pdflatex")
+    }
+
+    @Test
     func cleanRoomModeHidesSystemTeX() {
         let status = ToolchainService.detectSystemSynchronously(
             environment: [

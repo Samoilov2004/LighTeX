@@ -1,0 +1,76 @@
+# LighTex development
+
+## Requirements
+
+- macOS 14 or newer
+- Xcode Command Line Tools
+- MacTeX or BasicTeX with `latexmk` for local development
+
+## Run from source
+
+```bash
+./scripts/run.sh
+```
+
+Open a project directly:
+
+```bash
+./scripts/run.sh /path/to/project
+```
+
+## Clean-room runtime QA
+
+The default clean-room mode hides system TeX detection, uses isolated
+preferences and caches, and installs a tiny locally signed fixture. When local
+TeX is available, wrapper executables allow compilation without letting the
+fixture modify system packages.
+
+```bash
+./scripts/run-clean-room.sh
+```
+
+Test the actual managed runtime published in `runtime-latest`:
+
+```bash
+./scripts/run-clean-room.sh --release
+```
+
+## Build the app
+
+```bash
+./scripts/build-app.sh
+```
+
+The local bundle is ad-hoc signed. Public preview artifacts are built by
+`.github/workflows/app-release.yml` for Apple Silicon and Intel.
+
+## Managed runtime releases
+
+`scripts/build-runtime.sh` creates one portable TeX Live archive and its
+metadata. `.github/workflows/runtime-release.yml` builds Minimal, Standard, and
+Full for `arm64` and `x86_64`, signs the manifest with Ed25519, and publishes it
+under the stable `runtime-latest` tag.
+
+The preview runtime executables are ad-hoc signed, but are not Developer ID
+signed or notarized yet. Archive integrity remains protected by the signed
+manifest and SHA-256 hashes.
+
+Required GitHub Actions secrets:
+
+- `RUNTIME_SIGNING_PRIVATE_KEY_BASE64`
+- `RUNTIME_SIGNING_PUBLIC_KEY_BASE64`
+
+Never commit private keys, certificates, `.env` files, or provisioning
+profiles. The private manifest key belongs only in GitHub Actions Secrets.
+
+## Architecture
+
+```text
+Local folder
+    → ProjectScanner
+    → RuntimeManager (manifest, provider, absolute tool paths)
+    → AppModel (tabs, autosave, build state)
+    → NSTextView / LatexBuildService / managed tlmgr
+    → user cache
+    → PDFKit preview + final project PDF
+```

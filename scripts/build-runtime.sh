@@ -62,7 +62,11 @@ done
 if [[ -n "${CODE_SIGN_IDENTITY:-}" ]]; then
     while IFS= read -r executable; do
         if file "${executable}" | grep -q 'Mach-O'; then
-            codesign --force --options runtime --timestamp --sign "${CODE_SIGN_IDENTITY}" "${executable}"
+            if [[ "${CODE_SIGN_IDENTITY}" == "-" ]]; then
+                codesign --force --sign - "${executable}"
+            else
+                codesign --force --options runtime --timestamp --sign "${CODE_SIGN_IDENTITY}" "${executable}"
+            fi
         fi
     done < <(find "${BIN_DIRECTORY}" -type f -perm -111)
 fi

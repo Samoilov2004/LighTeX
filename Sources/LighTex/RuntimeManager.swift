@@ -12,7 +12,7 @@ enum RuntimeConfiguration {
             .flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/Samoilov2004/LighTeX/releases/download/runtime-latest/runtime-manifest.sig")!
     }
-    private static let developmentPublicKey = "taK2ZRu0mRv42P4x+kvgphBwAch/JzQnxYst1lRMW6k="
+    private static let developmentPublicKey = "ypmAAFFVK3x/OdzoPWUQPMOiq9XPc6tAfRlOHVVsJJ0="
 
     static var publicKeyData: Data {
         let environmentValue = ProcessInfo.processInfo.environment["LIGHTEX_RUNTIME_PUBLIC_KEY_BASE64"]

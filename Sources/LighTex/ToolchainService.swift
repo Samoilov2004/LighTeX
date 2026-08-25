@@ -119,7 +119,7 @@ enum ToolchainService {
         for directory in directories {
             let candidate = URL(fileURLWithPath: directory, isDirectory: true)
                 .appendingPathComponent(name)
-                .resolvingSymlinksInPath()
+                .standardizedFileURL
             if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate
             }
