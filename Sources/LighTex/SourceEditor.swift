@@ -364,6 +364,7 @@ struct SourceEditor: NSViewRepresentable {
 }
 
 final class CodeTextView: NSTextView {
+    private let detachedUndoManager = UndoManager()
     var editorTabWidth = 4
     var closesBracketsAutomatically = true
     var editorFont = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
@@ -372,6 +373,10 @@ final class CodeTextView: NSTextView {
     var opensAtDocumentStart = false
     var onWordDoubleClick: ((Int, Int) -> Void)?
     var completionIndex: ProjectCompletionIndex = .empty
+
+    override var undoManager: UndoManager? {
+        super.undoManager ?? detachedUndoManager
+    }
 
     func performLatexInsertion(_ request: LatexInsertionRequest) {
         guard let result = LatexInsertionService.result(
