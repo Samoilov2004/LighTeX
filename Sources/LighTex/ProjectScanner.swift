@@ -58,6 +58,12 @@ enum ProjectScanner {
             .map(\.url)
     }
 
+    static func editableTextFiles(in projectURL: URL) -> [URL] {
+        flatten(projectTree(in: projectURL))
+            .filter { !$0.isDirectory && $0.isEditableText }
+            .map(\.url)
+    }
+
     static func preferredEntryPoint(from files: [URL]) -> URL? {
         if let main = files.first(where: { $0.lastPathComponent.lowercased() == "main.tex" }) {
             return main

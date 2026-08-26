@@ -922,14 +922,31 @@ private struct WorkspaceView: View {
 private struct ProjectNavigator: View {
     @EnvironmentObject private var model: AppModel
     @State private var creationKind: ProjectItemCreationKind?
+    @State private var itemPendingRename: ProjectItem?
+    @State private var itemPendingTrash: ProjectItem?
 
     var body: some View {
-        VSplitView {
-            projectFiles
-                .frame(minHeight: 210)
+        VStack(spacing: 0) {
+            Picker("Project Navigator", selection: $model.sidebarMode) {
+                ForEach(ProjectSidebarMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 8)
+            .frame(height: 40)
 
-            documentOutline
-                .frame(minHeight: 120, idealHeight: 220)
+            Divider()
+
+            switch model.sidebarMode {
+            case .files:
+                projectFiles
+            case .search:
+                ProjectSearchNavigator()
+            case .outline:
+                documentOutline
+            }
         }
         .background(LighTexTheme.sidebarBackground)
         .sheet(item: $creationKind) { kind in
@@ -941,6 +958,29 @@ private struct ProjectNavigator: View {
                     model.createProjectFolder(named: name)
                 }
             }
+        }
+        .sheet(item: $itemPendingRename) { item in
+            RenameProjectItemSheet(item: item) { name in
+                model.renameProjectItem(item.url, to: name)
+            }
+        }
+        .confirmationDialog(
+            "Move “\(itemPendingTrash?.name ?? "item")” to the Trash?",
+            isPresented: Binding(
+                get: { itemPendingTrash != nil },
+                set: { if !$0 { itemPendingTrash = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let item = itemPendingTrash {
+                    model.moveProjectItemToTrash(item.url)
+                }
+                itemPendingTrash = nil
+            }
+            Button("Cancel", role: .cancel) { itemPendingTrash = nil }
+        } message: {
+            Text("The item can be recovered later from the macOS Trash.")
         }
     }
 
@@ -1005,6 +1045,10 @@ private struct ProjectNavigator: View {
                                 model.activateNavigatorItem(item.url)
                             }
                         }
+                        .dropDestination(for: URL.self) { urls, _ in
+                            guard item.isDirectory else { return false }
+                            return model.dropProjectItems(urls, into: item.url)
+                        }
                         .contextMenu {
                             if !item.isDirectory {
                                 Button("Open") {
@@ -1017,6 +1061,16 @@ private struct ProjectNavigator: View {
                                 }
                                 Divider()
                             }
+                            Button("Rename…") {
+                                itemPendingRename = item
+                            }
+                            Button("Duplicate") {
+                                model.duplicateProjectItem(item.url)
+                            }
+                            Button("Move to Trash…", role: .destructive) {
+                                itemPendingTrash = item
+                            }
+                            Divider()
                             Button("Reveal in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([item.url])
                             }
@@ -1029,6 +1083,10 @@ private struct ProjectNavigator: View {
                     if let selection {
                         model.activateNavigatorItem(selection)
                     }
+                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    guard let projectURL = model.projectURL else { return false }
+                    return model.dropProjectItems(urls, into: projectURL)
                 }
             }
         }
@@ -1079,19 +1137,238 @@ private struct ProjectNavigator: View {
                     Button {
                         model.openOutlineItem(item)
                     } label: {
-                        OutlineNavigatorRow(item: item)
+                        OutlineNavigatorRow(
+                            item: item,
+                            isSelected: item.id == model.selectedOutlineItemID
+                        )
                     }
                     .buttonStyle(.plain)
                     .help("\(item.fileURL.lastPathComponent), line \(item.line)")
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+                    .accessibilityAddTraits(
+                        item.id == model.selectedOutlineItemID ? .isSelected : []
+                    )
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
         .background(LighTexTheme.sidebarBackground)
+    }
+}
+
+private struct ProjectSearchNavigator: View {
+    @EnvironmentObject private var model: AppModel
+    @FocusState private var searchFieldFocused: Bool
+    @State private var confirmsReplaceAll = false
+
+    private var queryText: Binding<String> {
+        Binding(
+            get: { model.projectSearchQuery.text },
+            set: { value in
+                var query = model.projectSearchQuery
+                query.text = value
+                model.projectSearchQuery = query
+            }
+        )
+    }
+
+    private func optionBinding(_ keyPath: WritableKeyPath<ProjectSearchQuery, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { model.projectSearchQuery[keyPath: keyPath] },
+            set: { value in
+                var query = model.projectSearchQuery
+                query[keyPath: keyPath] = value
+                model.projectSearchQuery = query
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Search project", text: queryText)
+                        .textFieldStyle(.plain)
+                        .focused($searchFieldFocused)
+                        .onSubmit { model.runProjectSearchNow() }
+                    if model.isProjectSearchRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Searching project")
+                    } else if !model.projectSearchQuery.text.isEmpty {
+                        Button {
+                            queryText.wrappedValue = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel("Clear project search")
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.7))
+                }
+
+                HStack(spacing: 10) {
+                    Toggle("Case", isOn: optionBinding(\.caseSensitive))
+                    Toggle("Word", isOn: optionBinding(\.wholeWord))
+                    Toggle("Regex", isOn: optionBinding(\.usesRegularExpression))
+                    Spacer(minLength: 0)
+                }
+                .toggleStyle(.checkbox)
+                .font(.system(size: 10.5))
+
+                HStack(spacing: 6) {
+                    TextField("Replace with", text: $model.projectSearchReplacement)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11.5))
+                    Button("Replace All") {
+                        confirmsReplaceAll = true
+                    }
+                    .controlSize(.small)
+                    .disabled(model.projectSearchResults.isEmpty || model.isProjectSearchRunning)
+                }
+
+                if model.lastReplaceTransaction != nil {
+                    Button("Undo Last Replace") {
+                        model.undoLastProjectReplace()
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(9)
+
+            Divider()
+
+            searchResults
+        }
+        .onAppear { searchFieldFocused = true }
+        .alert("Replace all matches?", isPresented: $confirmsReplaceAll) {
+            Button("Replace All") { model.replaceAllProjectSearchResults() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will update \(Set(model.projectSearchResults.map(\.fileURL)).count) files. You can undo this replacement until the next Replace All operation.")
+        }
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        if let error = model.projectSearchError {
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.system(size: 11.5))
+                    .multilineTextAlignment(.center)
+                Button("Try Again") { model.runProjectSearchNow() }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.projectSearchQuery.isEmpty {
+            EmptyWorkspaceState(
+                icon: "magnifyingglass",
+                title: "Search the project",
+                detail: "Find text across all editable project files."
+            )
+        } else if model.projectSearchResults.isEmpty, !model.isProjectSearchRunning {
+            EmptyWorkspaceState(
+                icon: "magnifyingglass",
+                title: "No matches",
+                detail: "Try another phrase or change the search options."
+            )
+        } else {
+            let grouped = Dictionary(grouping: model.projectSearchResults, by: \.fileURL)
+            let files = grouped.keys.sorted {
+                $0.path.localizedStandardCompare($1.path) == .orderedAscending
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(files, id: \.self) { fileURL in
+                        Text(fileURL.lastPathComponent)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.top, 10)
+                            .padding(.bottom, 4)
+                        ForEach(grouped[fileURL] ?? []) { result in
+                            Button {
+                                model.openSearchResult(result)
+                            } label: {
+                                HStack(alignment: .top, spacing: 7) {
+                                    Text("\(result.line)")
+                                        .font(.system(size: 10).monospacedDigit())
+                                        .foregroundStyle(.tertiary)
+                                        .frame(width: 28, alignment: .trailing)
+                                    Text(result.preview)
+                                        .font(.system(size: 11.5).monospaced())
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Line \(result.line), column \(result.column)")
+                        }
+                    }
+                }
+            }
+            .accessibilityLabel("Project search results")
+        }
+    }
+}
+
+private struct RenameProjectItemSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let item: ProjectItem
+    let onRename: (String) -> Bool
+    @State private var name: String
+    @FocusState private var focused: Bool
+
+    init(item: ProjectItem, onRename: @escaping (String) -> Bool) {
+        self.item = item
+        self.onRename = onRename
+        _name = State(initialValue: item.name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename \(item.isDirectory ? "Folder" : "File")")
+                .font(.system(size: 17, weight: .semibold))
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename") {
+                    if onRename(name) { dismiss() }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name == item.name)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { focused = true }
     }
 }
 
@@ -1184,26 +1461,24 @@ private struct ProjectFileTreeRow: View {
 
     @ViewBuilder
     var body: some View {
-        if item.isDirectory {
-            row
-        } else {
-            row
-                .onDrag {
-                    NSItemProvider(object: item.url as NSURL)
-                } preview: {
-                    HStack(spacing: 6) {
-                        Image(systemName: item.iconName)
-                            .foregroundStyle(.secondary)
-                        Text(item.name)
-                            .lineLimit(1)
-                    }
-                    .font(.system(size: 12.5, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        row
+            .onDrag {
+                NSItemProvider(object: item.url as NSURL)
+            } preview: {
+                HStack(spacing: 6) {
+                    Image(systemName: item.iconName)
+                        .foregroundStyle(.secondary)
+                    Text(item.name)
+                        .lineLimit(1)
                 }
-                .help("Drag to the tab bar to open \(item.name)")
-        }
+                .font(.system(size: 12.5, weight: .medium))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .help(item.isDirectory
+                ? "Drag to move \(item.name)"
+                : "Drag to open or move \(item.name)")
     }
 
     private var row: some View {
@@ -1227,13 +1502,14 @@ private struct ProjectFileTreeRow: View {
 
 private struct OutlineNavigatorRow: View {
     let item: DocumentOutlineItem
+    let isSelected: Bool
     @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 7) {
             if item.level == 0 {
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.72))
+                    .fill(Color.secondary.opacity(0.35))
                     .frame(width: 2, height: 15)
             } else {
                 Circle()
@@ -1258,6 +1534,12 @@ private struct OutlineNavigatorRow: View {
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(isHovering ? LighTexTheme.hover : .clear)
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.13))
+                    }
+                }
                 .padding(.horizontal, 4)
         )
         .onHover { isHovering = $0 }
@@ -1416,63 +1698,99 @@ private struct EditorTabBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 0) {
-                            ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
-                                let isActive = document.id == model.selectedDocumentID
-                                let nextIsActive = visibleDocuments.indices.contains(index + 1)
-                                    && visibleDocuments[index + 1].id == model.selectedDocumentID
-                                EditorTab(
-                                    document: document,
-                                    isActive: isActive,
-                                    showsTrailingSeparator: !isActive
-                                        && !nextIsActive
-                                        && index < visibleDocuments.count - 1,
-                                    dropIndicator: $dropIndicator
-                                )
+                            let visibleDocuments = model.openDocuments.filter { $0.id != draggedDocumentID }
+                            HStack(spacing: 0) {
+                                ForEach(Array(visibleDocuments.enumerated()), id: \.element.id) { index, document in
+                                    let isActive = document.id == model.selectedDocumentID
+                                    let nextIsActive = visibleDocuments.indices.contains(index + 1)
+                                        && visibleDocuments[index + 1].id == model.selectedDocumentID
+                                    EditorTab(
+                                        document: document,
+                                        isActive: isActive,
+                                        showsTrailingSeparator: !isActive
+                                            && !nextIsActive
+                                            && index < visibleDocuments.count - 1,
+                                        dropIndicator: $dropIndicator
+                                    )
+                                    .id(document.id)
+                                }
                             }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: EditorTabsContentWidthPreferenceKey.self,
-                                    value: proxy.size.width
-                                )
+                            .fixedSize(horizontal: true, vertical: false)
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: EditorTabsContentWidthPreferenceKey.self,
+                                        value: proxy.size.width
+                                    )
+                                }
                             }
-                        }
 
-                        ProjectFileDropReceiver(
-                            onDrop: openFirstDroppedProjectFile,
-                            onTargeted: { isFileDropTarget = $0 }
+                            ProjectFileDropReceiver(
+                                onDrop: openFirstDroppedProjectFile,
+                                onTargeted: { isFileDropTarget = $0 }
+                            )
+                                .frame(
+                                    width: max(44, geometry.size.width - tabsContentWidth),
+                                    height: 34
+                                )
+                                .background(
+                                    isFileDropTarget
+                                        ? Color.accentColor.opacity(0.07)
+                                        : LighTexTheme.secondaryBackground
+                                )
+                        }
+                        .frame(
+                            width: max(geometry.size.width, tabsContentWidth + 44),
+                            height: 34,
+                            alignment: .leading
                         )
-                            .frame(
-                                width: max(44, geometry.size.width - tabsContentWidth),
-                                height: 34
-                            )
-                            .background(
-                                isFileDropTarget
-                                    ? Color.accentColor.opacity(0.07)
-                                    : LighTexTheme.secondaryBackground
-                            )
+                        .animation(
+                            reduceMotion ? nil : .easeInOut(duration: 0.12),
+                            value: model.openDocuments.map(\.id)
+                        )
+                        .animation(
+                            reduceMotion ? nil : .easeInOut(duration: 0.12),
+                            value: draggedDocumentID
+                        )
                     }
-                    .frame(
-                        width: max(geometry.size.width, tabsContentWidth + 44),
-                        height: 34,
-                        alignment: .leading
-                    )
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.12),
-                        value: model.openDocuments.map(\.id)
-                    )
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.12),
-                        value: draggedDocumentID
-                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, tabsContentWidth > geometry.size.width ? 30 : 0)
+                    .onChange(of: model.selectedDocumentID) { _, selected in
+                        guard let selected else { return }
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                            scrollProxy.scrollTo(selected, anchor: .center)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if tabsContentWidth > geometry.size.width {
+                    Menu {
+                        ForEach(model.openDocuments) { document in
+                            Button {
+                                model.selectDocument(document.url)
+                            } label: {
+                                HStack {
+                                    if document.id == model.selectedDocumentID {
+                                        Image(systemName: "checkmark")
+                                    }
+                                    Text(document.displayName + (document.isDirty ? " •" : ""))
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .frame(width: 28, height: 34)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .background(LighTexTheme.secondaryBackground)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .help("Show all open files")
+                    .accessibilityLabel("Show all open files")
+                }
 
                 if let draggedDocument {
                     EditorTabDragPreview(document: draggedDocument)

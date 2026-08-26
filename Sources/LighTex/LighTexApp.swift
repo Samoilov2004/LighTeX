@@ -269,6 +269,12 @@ struct LighTexApp: App {
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(!model.hasProject)
+
+                Button("Search Project") {
+                    model.showProjectSearch()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(!model.hasProject)
             }
 
             CommandMenu("Build") {

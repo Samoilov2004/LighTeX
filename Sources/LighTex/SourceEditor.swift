@@ -60,8 +60,9 @@ struct SourceEditor: NSViewRepresentable {
                   let textView = notification.object as? CodeTextView else {
                 return
             }
+            let editedRange = textView.textStorage?.editedRange
             parent.text = textView.string
-            applySyntaxHighlighting(to: textView)
+            applySyntaxHighlighting(to: textView, editedRange: editedRange)
             updateSelectionState(textView)
             rulerView?.needsDisplay = true
         }
@@ -76,10 +77,10 @@ struct SourceEditor: NSViewRepresentable {
             rulerView?.needsDisplay = true
         }
 
-        func applySyntaxHighlighting(to textView: CodeTextView) {
+        func applySyntaxHighlighting(to textView: CodeTextView, editedRange: NSRange? = nil) {
             guard let textStorage = textView.textStorage else { return }
             isApplyingUpdate = true
-            SyntaxHighlighter.applyColors(to: textStorage)
+            SyntaxHighlighter.applyColors(to: textStorage, editedRange: editedRange)
             textView.refreshTypingAttributes()
             isApplyingUpdate = false
         }
@@ -653,7 +654,18 @@ func lineNumberOriginY(sourceBaselineY: CGFloat, numberFontAscender: CGFloat) ->
     sourceBaselineY - numberFontAscender
 }
 
-private enum SyntaxHighlighter {
+enum SyntaxHighlighter {
+    private static let commentExpression = try! NSRegularExpression(
+        pattern: #"%.*$"#,
+        options: [.anchorsMatchLines]
+    )
+    private static let commandExpression = try! NSRegularExpression(pattern: #"\\[A-Za-z@]+\*?"#)
+    private static let inlineMathExpression = try! NSRegularExpression(pattern: #"\$[^$\n]+\$"#)
+    private static let keywordExpression = try! NSRegularExpression(
+        pattern: #"\b(?:begin|end|documentclass|usepackage)\b"#
+    )
+    private static let bracketExpression = try! NSRegularExpression(pattern: #"[{}\[\]()]"#)
+
     static func applyTypography(
         to storage: NSTextStorage,
         font: NSFont,
@@ -670,30 +682,52 @@ private enum SyntaxHighlighter {
         storage.endEditing()
     }
 
-    static func applyColors(to storage: NSTextStorage) {
+    static func applyColors(to storage: NSTextStorage, editedRange: NSRange? = nil) {
         let fullRange = NSRange(location: 0, length: storage.length)
         guard fullRange.length > 0 else { return }
+        let targetRange = highlightRange(in: storage.string as NSString, editedRange: editedRange)
 
         storage.beginEditing()
-        storage.addAttribute(.foregroundColor, value: editorBaseTextColor, range: fullRange)
-        apply(#"%.*$"#, color: .secondaryLabelColor, options: [.anchorsMatchLines], to: storage)
-        apply(#"\\[A-Za-z@]+\*?"#, color: NSColor.systemBlue.withAlphaComponent(0.88), to: storage)
-        apply(#"\$[^$\n]+\$"#, color: NSColor.systemPurple.withAlphaComponent(0.76), to: storage)
-        apply(#"\b(?:begin|end|documentclass|usepackage)\b"#, color: NSColor.systemBlue.withAlphaComponent(0.88), to: storage)
-        apply(#"[{}\[\]()]"#, color: .secondaryLabelColor, to: storage)
+        storage.addAttribute(.foregroundColor, value: editorBaseTextColor, range: targetRange)
+        apply(commentExpression, color: .secondaryLabelColor, in: targetRange, to: storage)
+        apply(commandExpression, color: NSColor.systemBlue.withAlphaComponent(0.88), in: targetRange, to: storage)
+        apply(inlineMathExpression, color: NSColor.systemPurple.withAlphaComponent(0.76), in: targetRange, to: storage)
+        apply(keywordExpression, color: NSColor.systemBlue.withAlphaComponent(0.88), in: targetRange, to: storage)
+        apply(bracketExpression, color: .secondaryLabelColor, in: targetRange, to: storage)
         storage.endEditing()
     }
 
+    static func highlightRange(in text: NSString, editedRange: NSRange?) -> NSRange {
+        guard let editedRange, editedRange.location != NSNotFound else {
+            return NSRange(location: 0, length: text.length)
+        }
+        guard text.length > 0 else { return NSRange(location: 0, length: 0) }
+        let safeLocation = min(max(0, editedRange.location), text.length - 1)
+        let safeLength = min(max(0, editedRange.length), text.length - safeLocation)
+        var range = text.lineRange(for: NSRange(location: safeLocation, length: safeLength))
+        if range.location > 0 {
+            range = NSUnionRange(
+                range,
+                text.lineRange(for: NSRange(location: range.location - 1, length: 0))
+            )
+        }
+        if NSMaxRange(range) < text.length {
+            range = NSUnionRange(
+                range,
+                text.lineRange(for: NSRange(location: NSMaxRange(range), length: 0))
+            )
+        }
+        return NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+    }
+
     private static func apply(
-        _ pattern: String,
+        _ expression: NSRegularExpression,
         color: NSColor,
-        options: NSRegularExpression.Options = [],
+        in range: NSRange,
         to storage: NSTextStorage
     ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return }
         let text = storage.string
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        for match in regex.matches(in: text, range: range) {
+        for match in expression.matches(in: text, range: range) {
             storage.addAttribute(.foregroundColor, value: color, range: match.range)
         }
     }

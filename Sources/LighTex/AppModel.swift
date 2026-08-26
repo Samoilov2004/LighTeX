@@ -28,10 +28,22 @@ final class AppModel: ObservableObject {
     @Published private(set) var projectURL: URL?
     @Published private(set) var projectTree: [ProjectItem] = []
     @Published private(set) var outlineItems: [DocumentOutlineItem] = []
+    @Published private(set) var selectedOutlineItemID: String?
     @Published private(set) var entryFileURL: URL?
     @Published private(set) var openDocuments: [EditorDocument] = []
     @Published var selectedDocumentID: URL?
     @Published var navigatorSelection: URL?
+    @Published var sidebarMode: ProjectSidebarMode {
+        didSet { defaults.set(sidebarMode.rawValue, forKey: "ui.projectSidebarMode") }
+    }
+    @Published var projectSearchQuery = ProjectSearchQuery() {
+        didSet { scheduleProjectSearch() }
+    }
+    @Published var projectSearchReplacement = ""
+    @Published private(set) var projectSearchResults: [ProjectSearchResult] = []
+    @Published private(set) var projectSearchError: String?
+    @Published private(set) var isProjectSearchRunning = false
+    @Published private(set) var lastReplaceTransaction: ReplaceTransaction?
 
     @Published private(set) var previewPDFURL: URL?
     @Published private(set) var pdfRevision = 0
@@ -70,6 +82,9 @@ final class AppModel: ObservableObject {
 
     private var pendingSaveTask: Task<Void, Never>?
     private var pendingBuildTask: Task<Void, Never>?
+    private var pendingOutlineTask: Task<Void, Never>?
+    private var pendingSearchTask: Task<Void, Never>?
+    private var outlineCache: [URL: [DocumentOutlineItem]] = [:]
     private var buildQueuedWhileBuilding = false
     private var runtimeCancellable: AnyCancellable?
     private var projectFileMonitor: ProjectFileMonitor?
@@ -118,6 +133,8 @@ final class AppModel: ObservableObject {
         self.defaults = defaults
         self.templateStore = templateStore ?? ProjectTemplateStore()
         self.dirtyDocumentCoordinator = dirtyDocumentCoordinator ?? DirtyDocumentCoordinator()
+        sidebarMode = defaults.string(forKey: "ui.projectSidebarMode")
+            .flatMap(ProjectSidebarMode.init(rawValue:)) ?? .files
         showsSidebar = defaults.object(forKey: "ui.showsSidebar") as? Bool ?? true
         showsPDF = defaults.object(forKey: "ui.showsPDF") as? Bool ?? true
         recentProjects = loadRecentProjects()
@@ -330,6 +347,8 @@ final class AppModel: ObservableObject {
         stopMonitoringProject()
         pendingSaveTask?.cancel()
         pendingBuildTask?.cancel()
+        pendingOutlineTask?.cancel()
+        pendingSearchTask?.cancel()
         buildQueuedWhileBuilding = false
 
         showsTemplates = false
@@ -338,6 +357,11 @@ final class AppModel: ObservableObject {
         let texFiles = ProjectScanner.texFiles(in: standardizedURL)
         entryFileURL = restoredEntryFile(in: standardizedURL, candidates: texFiles)
         openDocuments = []
+        outlineCache = [:]
+        selectedOutlineItemID = nil
+        projectSearchResults = []
+        projectSearchError = nil
+        lastReplaceTransaction = nil
         selectedDocumentID = nil
         navigatorSelection = nil
         buildLog = ""
@@ -397,11 +421,18 @@ final class AppModel: ObservableObject {
         stopMonitoringProject()
         pendingSaveTask?.cancel()
         pendingBuildTask?.cancel()
+        pendingOutlineTask?.cancel()
+        pendingSearchTask?.cancel()
         buildQueuedWhileBuilding = false
         projectURL = nil
         showsTemplates = false
         projectTree = []
         outlineItems = []
+        outlineCache = [:]
+        selectedOutlineItemID = nil
+        projectSearchResults = []
+        projectSearchError = nil
+        lastReplaceTransaction = nil
         entryFileURL = nil
         openDocuments = []
         selectedDocumentID = nil
@@ -590,7 +621,7 @@ final class AppModel: ObservableObject {
         panel.message = "Files are copied into \(directory.lastPathComponent)."
         panel.prompt = "Add"
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
 
         guard panel.runModal() == .OK else { return }
@@ -623,6 +654,105 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func renameProjectItem(_ url: URL, to proposedName: String) -> Bool {
+        guard let name = Self.validProjectItemName(proposedName),
+              isInsideProject(url),
+              url != projectURL else {
+            alertMessage = "Enter a valid name without path separators."
+            return false
+        }
+        let destination = url.deletingLastPathComponent()
+            .appendingPathComponent(name, isDirectory: findProjectItem(url: url, in: projectTree)?.isDirectory == true)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            alertMessage = "An item named \(name) already exists in this folder."
+            return false
+        }
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+            migrateOpenDocumentURLs(from: url, to: destination)
+            if navigatorSelection == url { navigatorSelection = destination }
+            refreshProject()
+            runProjectSearchNow()
+            return true
+        } catch {
+            alertMessage = "LighTex could not rename \(url.lastPathComponent): \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func duplicateProjectItem(_ url: URL) {
+        guard isInsideProject(url), url != projectURL else { return }
+        let destination = uniqueDuplicateURL(for: url)
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+            refreshProject()
+            navigatorSelection = destination
+        } catch {
+            alertMessage = "LighTex could not duplicate \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
+    func moveProjectItemToTrash(_ url: URL) {
+        guard isInsideProject(url), url != projectURL else { return }
+        let affectedDocuments = openDocuments.filter { documentURL($0.url, isInside: url) }
+        guard approveDocuments(affectedDocuments.filter(\.isDirty), kind: .project) else { return }
+
+        NSWorkspace.shared.recycle([url]) { [weak self] _, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    self.alertMessage = "LighTex could not move \(url.lastPathComponent) to the Trash: \(error.localizedDescription)"
+                    return
+                }
+                for document in affectedDocuments {
+                    self.performCloseDocument(document.url)
+                }
+                self.refreshProject()
+                self.runProjectSearchNow()
+            }
+        }
+    }
+
+    @discardableResult
+    func dropProjectItems(_ sourceURLs: [URL], into directoryURL: URL) -> Bool {
+        guard isInsideProject(directoryURL),
+              directoryURL == projectURL || findProjectItem(url: directoryURL, in: projectTree)?.isDirectory == true else {
+            return false
+        }
+        var skipped: [String] = []
+        var changed = false
+
+        for rawSource in sourceURLs {
+            let source = rawSource.standardizedFileURL
+            let destination = directoryURL.appendingPathComponent(source.lastPathComponent)
+            guard source != destination,
+                  !FileManager.default.fileExists(atPath: destination.path),
+                  !directoryURL.path.hasPrefix(source.path + "/") else {
+                skipped.append(source.lastPathComponent)
+                continue
+            }
+            do {
+                if isInsideProject(source) {
+                    try FileManager.default.moveItem(at: source, to: destination)
+                    migrateOpenDocumentURLs(from: source, to: destination)
+                } else {
+                    try FileManager.default.copyItem(at: source, to: destination)
+                }
+                changed = true
+            } catch {
+                skipped.append(source.lastPathComponent)
+            }
+        }
+        if changed {
+            refreshProject()
+            runProjectSearchNow()
+        }
+        if !skipped.isEmpty {
+            alertMessage = "These items were not added because a destination already exists or the move failed: \(skipped.joined(separator: ", "))."
+        }
+        return changed
+    }
+
     static func validProjectItemName(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -643,7 +773,13 @@ final class AppModel: ObservableObject {
         }
         openDocuments[index].text = text
         openDocuments[index].isDirty = true
-        refreshOutline()
+        scheduleOutlineRefresh(
+            for: selectedDocumentID,
+            text: text
+        )
+        if sidebarMode == .search, !projectSearchQuery.isEmpty {
+            scheduleProjectSearch()
+        }
         scheduleSave(for: selectedDocumentID)
         scheduleAutomaticBuild()
     }
@@ -786,6 +922,7 @@ final class AppModel: ObservableObject {
     }
 
     func openOutlineItem(_ item: DocumentOutlineItem) {
+        selectedOutlineItemID = item.id
         openDocument(item.fileURL, line: item.line)
         jumpPDF(toSource: item.fileURL, line: item.line, column: 1)
     }
@@ -821,6 +958,62 @@ final class AppModel: ObservableObject {
         }
         if cursorColumn != column {
             cursorColumn = column
+        }
+        updateCurrentOutlineSelection()
+    }
+
+    func showProjectSearch() {
+        showsSidebar = true
+        sidebarMode = .search
+    }
+
+    func runProjectSearchNow() {
+        scheduleProjectSearch(immediately: true)
+    }
+
+    func openSearchResult(_ result: ProjectSearchResult) {
+        openDocument(result.fileURL, line: result.line)
+    }
+
+    func replaceAllProjectSearchResults() {
+        guard let projectURL, !projectSearchQuery.isEmpty else { return }
+        let query = projectSearchQuery
+        let replacement = projectSearchReplacement
+        let openSources = Dictionary(uniqueKeysWithValues: openDocuments.map { ($0.url, $0.text) })
+        isProjectSearchRunning = true
+        projectSearchError = nil
+        Task { [weak self] in
+            do {
+                let transaction = try await Task.detached(priority: .userInitiated) {
+                    try ProjectSearchService.replacementTransaction(
+                        projectURL: projectURL,
+                        query: query,
+                        replacement: replacement,
+                        openSources: openSources
+                    )
+                }.value
+                guard let self, self.projectURL == projectURL else { return }
+                try self.applyReplaceTransaction(transaction, undoing: false)
+                self.lastReplaceTransaction = transaction.changes.isEmpty ? nil : transaction
+                self.isProjectSearchRunning = false
+                self.refreshOutline()
+                self.runProjectSearchNow()
+            } catch {
+                self?.isProjectSearchRunning = false
+                self?.projectSearchError = error.localizedDescription
+            }
+        }
+    }
+
+    func undoLastProjectReplace() {
+        guard let transaction = lastReplaceTransaction else { return }
+        do {
+            try applyReplaceTransaction(transaction, undoing: true)
+            lastReplaceTransaction = nil
+            refreshOutline()
+            runProjectSearchNow()
+        } catch {
+            projectSearchError = error.localizedDescription
         }
     }
 
@@ -975,8 +1168,14 @@ final class AppModel: ObservableObject {
         case .project, .switchProject, .application:
             documents = openDocuments.filter(\.isDirty)
         }
-        guard !documents.isEmpty else { return true }
+        return approveDocuments(documents, kind: kind)
+    }
 
+    private func approveDocuments(
+        _ documents: [EditorDocument],
+        kind: CloseRequestKind
+    ) -> Bool {
+        guard !documents.isEmpty else { return true }
         let request = CloseRequest(
             kind: kind,
             documentNames: documents.map(\.displayName)
@@ -1121,6 +1320,53 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func migrateOpenDocumentURLs(from source: URL, to destination: URL) {
+        for index in openDocuments.indices {
+            let documentURL = openDocuments[index].url
+            if documentURL == source {
+                replaceDocumentURL(at: index, with: destination)
+            } else if documentURL.path.hasPrefix(source.path + "/") {
+                let suffix = String(documentURL.path.dropFirst(source.path.count + 1))
+                replaceDocumentURL(
+                    at: index,
+                    with: destination.appendingPathComponent(suffix)
+                )
+            }
+        }
+        if let navigatorSelection {
+            if navigatorSelection == source {
+                self.navigatorSelection = destination
+            } else if navigatorSelection.path.hasPrefix(source.path + "/") {
+                let suffix = String(navigatorSelection.path.dropFirst(source.path.count + 1))
+                self.navigatorSelection = destination.appendingPathComponent(suffix)
+            }
+        }
+        persistOpenDocuments()
+    }
+
+    private func uniqueDuplicateURL(for source: URL) -> URL {
+        let directory = source.deletingLastPathComponent()
+        let isDirectory = findProjectItem(url: source, in: projectTree)?.isDirectory == true
+        let pathExtension = isDirectory ? "" : source.pathExtension
+        let stem = pathExtension.isEmpty
+            ? source.lastPathComponent
+            : source.deletingPathExtension().lastPathComponent
+        var counter = 1
+        while true {
+            let suffix = counter == 1 ? " copy" : " copy \(counter)"
+            let name = pathExtension.isEmpty
+                ? stem + suffix
+                : stem + suffix + "." + pathExtension
+            let candidate = directory.appendingPathComponent(name, isDirectory: isDirectory)
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            counter += 1
+        }
+    }
+
+    private func documentURL(_ documentURL: URL, isInside itemURL: URL) -> Bool {
+        documentURL == itemURL || documentURL.path.hasPrefix(itemURL.path + "/")
+    }
+
     private func isInsideProject(_ url: URL) -> Bool {
         guard let projectURL else { return false }
         let root = projectURL.standardizedFileURL.path
@@ -1164,27 +1410,169 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func scheduleProjectSearch(immediately: Bool = false) {
+        pendingSearchTask?.cancel()
+        guard let projectURL, !projectSearchQuery.isEmpty else {
+            projectSearchResults = []
+            projectSearchError = nil
+            isProjectSearchRunning = false
+            return
+        }
+        let query = projectSearchQuery
+        let openSources = Dictionary(uniqueKeysWithValues: openDocuments.map { ($0.url, $0.text) })
+        isProjectSearchRunning = true
+        pendingSearchTask = Task { [weak self] in
+            if !immediately {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                let results = try await Task.detached(priority: .userInitiated) {
+                    try ProjectSearchService.search(
+                        projectURL: projectURL,
+                        query: query,
+                        openSources: openSources
+                    )
+                }.value
+                guard !Task.isCancelled, let self,
+                      self.projectURL == projectURL,
+                      self.projectSearchQuery == query else { return }
+                self.projectSearchResults = results
+                self.projectSearchError = nil
+                self.isProjectSearchRunning = false
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.projectSearchResults = []
+                self.projectSearchError = error.localizedDescription
+                self.isProjectSearchRunning = false
+            }
+        }
+    }
+
+    private func applyReplaceTransaction(
+        _ transaction: ReplaceTransaction,
+        undoing: Bool
+    ) throws {
+        let expected: (ReplaceFileChange) -> String = {
+            undoing ? $0.replacementText : $0.originalText
+        }
+        let target: (ReplaceFileChange) -> String = {
+            undoing ? $0.originalText : $0.replacementText
+        }
+
+        for change in transaction.changes {
+            if let document = openDocuments.first(where: { $0.url == change.fileURL }) {
+                guard document.externalChangeState == .none,
+                      document.text == expected(change) else {
+                    throw ProjectSearchError.fileChanged(change.fileURL.lastPathComponent)
+                }
+            } else {
+                let current = try String(contentsOf: change.fileURL, encoding: .utf8)
+                guard current == expected(change) else {
+                    throw ProjectSearchError.fileChanged(change.fileURL.lastPathComponent)
+                }
+            }
+        }
+
+        var writtenChanges: [ReplaceFileChange] = []
+        do {
+            for change in transaction.changes where !openDocuments.contains(where: { $0.url == change.fileURL }) {
+                try target(change).write(to: change.fileURL, atomically: true, encoding: .utf8)
+                writtenChanges.append(change)
+            }
+        } catch {
+            for change in writtenChanges {
+                try? expected(change).write(to: change.fileURL, atomically: true, encoding: .utf8)
+            }
+            throw error
+        }
+
+        for change in transaction.changes {
+            guard let index = openDocuments.firstIndex(where: { $0.url == change.fileURL }) else { continue }
+            openDocuments[index].text = target(change)
+            openDocuments[index].isDirty = true
+        }
+        if transaction.changes.contains(where: { change in
+            openDocuments.contains(where: { $0.url == change.fileURL })
+        }) {
+            pendingSaveTask?.cancel()
+            pendingSaveTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled, let self, self.settings.autosave else { return }
+                _ = self.saveAllDocuments()
+            }
+        }
+        scheduleAutomaticBuild()
+    }
+
     private func refreshOutline() {
+        pendingOutlineTask?.cancel()
         guard let projectURL else {
             outlineItems = []
+            outlineCache = [:]
+            selectedOutlineItemID = nil
             return
         }
         let texFiles = ProjectScanner.texFiles(in: projectURL)
+        let openSources = Dictionary(uniqueKeysWithValues: openDocuments.map { ($0.url, $0.text) })
+        pendingOutlineTask = Task { [weak self] in
+            let parsed = await Task.detached(priority: .utility) {
+                Dictionary(uniqueKeysWithValues: texFiles.map { fileURL in
+                    let source = openSources[fileURL]
+                        ?? (try? String(contentsOf: fileURL, encoding: .utf8))
+                        ?? ""
+                    return (fileURL, LatexOutlineParser.parse(source, fileURL: fileURL))
+                })
+            }.value
+            guard !Task.isCancelled, let self, self.projectURL == projectURL else { return }
+            self.outlineCache = parsed
+            self.publishOutline(for: texFiles)
+        }
+    }
+
+    private func scheduleOutlineRefresh(for fileURL: URL, text: String) {
+        guard fileURL.pathExtension.lowercased() == "tex" else {
+            updateCurrentOutlineSelection()
+            return
+        }
+        pendingOutlineTask?.cancel()
+        pendingOutlineTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let items = await Task.detached(priority: .utility) {
+                LatexOutlineParser.parse(text, fileURL: fileURL)
+            }.value
+            guard !Task.isCancelled, let self,
+                  self.openDocuments.contains(where: { $0.url == fileURL && $0.text == text }) else {
+                return
+            }
+            self.outlineCache[fileURL] = items
+            let texFiles = ProjectScanner.texFiles(in: self.projectURL ?? fileURL.deletingLastPathComponent())
+            self.publishOutline(for: texFiles)
+        }
+    }
+
+    private func publishOutline(for texFiles: [URL]) {
+        let validFiles = Set(texFiles)
+        outlineCache = outlineCache.filter { validFiles.contains($0.key) }
         let orderedFiles = texFiles.sorted { lhs, rhs in
             if lhs == entryFileURL { return true }
             if rhs == entryFileURL { return false }
             return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
         }
+        outlineItems = orderedFiles.flatMap { outlineCache[$0] ?? [] }
+        updateCurrentOutlineSelection()
+    }
 
-        outlineItems = orderedFiles.flatMap { fileURL in
-            let source: String?
-            if let document = openDocuments.first(where: { $0.url == fileURL }) {
-                source = document.text
-            } else {
-                source = try? String(contentsOf: fileURL, encoding: .utf8)
-            }
-            return source.map { LatexOutlineParser.parse($0, fileURL: fileURL) } ?? []
+    private func updateCurrentOutlineSelection() {
+        guard let selectedDocumentID else {
+            selectedOutlineItemID = nil
+            return
         }
+        selectedOutlineItemID = outlineItems
+            .filter { $0.fileURL == selectedDocumentID && $0.line <= cursorLine }
+            .max(by: { $0.line < $1.line })?
+            .id
     }
 
     private func updateRecentProjects(with url: URL) {

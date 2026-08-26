@@ -864,6 +864,75 @@ struct LighTexTests {
         #expect(first.contentHash != second.contentHash)
         #expect(first.fileSize == second.fileSize)
     }
+
+    @Test
+    func projectSearchUsesDirtySourcesAndBuildsReversibleReplacement() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main.tex")
+        let notes = root.appendingPathComponent("notes.tex")
+        try "Alpha on disk".write(to: main, atomically: true, encoding: .utf8)
+        try "alpha in notes".write(to: notes, atomically: true, encoding: .utf8)
+
+        let query = ProjectSearchQuery(text: "alpha", caseSensitive: false)
+        let openSources = [main: "alpha from unsaved editor"]
+        let results = try ProjectSearchService.search(
+            projectURL: root,
+            query: query,
+            openSources: openSources
+        )
+        #expect(results.count == 2)
+        #expect(results.contains { $0.fileURL == main && $0.preview.contains("unsaved") })
+
+        let transaction = try ProjectSearchService.replacementTransaction(
+            projectURL: root,
+            query: query,
+            replacement: "beta",
+            openSources: openSources
+        )
+        #expect(transaction.changes.count == 2)
+        #expect(transaction.changes.first { $0.fileURL == main }?.replacementText == "beta from unsaved editor")
+    }
+
+    @Test
+    func incrementalHighlightRangeDoesNotCoverUnchangedDocument() {
+        let source = NSString(string: (0..<100).map { "line \($0)" }.joined(separator: "\n"))
+        let editedLocation = source.range(of: "line 50").location
+        let range = SyntaxHighlighter.highlightRange(
+            in: source,
+            editedRange: NSRange(location: editedLocation, length: 1)
+        )
+        #expect(range.location > 0)
+        #expect(range.length < source.length / 4)
+        #expect(NSLocationInRange(editedLocation, range))
+    }
+
+    @Test @MainActor
+    func persistsChosenMainDocumentPerProject() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main.tex")
+        let alternate = root.appendingPathComponent("alternate.tex")
+        try "\\documentclass{article}".write(to: main, atomically: true, encoding: .utf8)
+        try "\\documentclass{article}".write(to: alternate, atomically: true, encoding: .utf8)
+
+        let defaults = makeIsolatedDefaults()
+        let firstSettings = AppSettings(defaults: defaults)
+        let first = AppModel(settings: firstSettings, defaults: defaults)
+        first.openProject(root)
+        first.setEntryFile(alternate)
+        first.closeProject()
+
+        let secondSettings = AppSettings(defaults: defaults)
+        let second = AppModel(settings: secondSettings, defaults: defaults)
+        second.openProject(root)
+        #expect(second.entryFileURL == alternate)
+        second.closeProject()
+    }
 }
 
 private func makeIsolatedDefaults() -> UserDefaults {
