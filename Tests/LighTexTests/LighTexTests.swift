@@ -591,6 +591,141 @@ struct LighTexTests {
         #expect(try ToolchainService.status(for: record).engines.count == 3)
     }
 
+    @Test
+    func providesFourBuiltInProjectTemplates() {
+        #expect(
+            ProjectTemplate.builtInTemplates.map(\.name)
+                == ["Simple Article", "Math Notes", "Textbook", "Presentation"]
+        )
+        #expect(ProjectTemplate.builtInTemplates.map(\.id).allSatisfy { !$0.isEmpty })
+        #expect(ProjectTemplate.builtInTemplates.last?.previewStyle == .presentation)
+    }
+
+    @Test
+    func savesReusesAndDeletesPersonalTemplateSafely() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let source = temporary.appendingPathComponent("Original", isDirectory: true)
+        let userLibrary = temporary.appendingPathComponent("Templates/Yours", isDirectory: true)
+        let projects = temporary.appendingPathComponent("Projects", isDirectory: true)
+        let store = ProjectTemplateStore(userTemplatesDirectory: userLibrary)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        try #"""
+        \documentclass{article}
+        \title{${PROJECT_NAME}}
+        \author{${AUTHOR}}
+        \begin{document}
+        ${DATE}
+        \end{document}
+        """#.write(
+            to: source.appendingPathComponent("main.tex"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "generated".write(
+            to: source.appendingPathComponent("main.aux"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data("compiled".utf8).write(to: source.appendingPathComponent("main.pdf"))
+        try Data("figure".utf8).write(to: source.appendingPathComponent("figure.pdf"))
+        try "private".write(
+            to: source.appendingPathComponent(".git/config"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let template = try store.saveUserTemplate(
+            from: source,
+            name: "My Article",
+            summary: "A reusable article"
+        )
+        let templateFiles = try #require(template.userDirectory)
+            .appendingPathComponent("files", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: templateFiles.appendingPathComponent("main.tex").path))
+        #expect(!FileManager.default.fileExists(atPath: templateFiles.appendingPathComponent("main.aux").path))
+        #expect(!FileManager.default.fileExists(atPath: templateFiles.appendingPathComponent("main.pdf").path))
+        #expect(FileManager.default.fileExists(atPath: templateFiles.appendingPathComponent("figure.pdf").path))
+        #expect(!FileManager.default.fileExists(atPath: templateFiles.appendingPathComponent(".git").path))
+
+        let project = try store.instantiate(
+            template: template,
+            projectName: "New_Project",
+            author: "Ada & Bob",
+            location: projects
+        )
+        let contents = try String(
+            contentsOf: project.appendingPathComponent("main.tex"),
+            encoding: .utf8
+        )
+        #expect(contents.contains("\\title{New\\_Project}"))
+        #expect(contents.contains("\\author{Ada \\& Bob}"))
+        #expect(!contents.contains("${PROJECT_NAME}"))
+        #expect(FileManager.default.fileExists(atPath: project.appendingPathComponent("figure.pdf").path))
+
+        try store.deleteUserTemplate(template)
+        #expect(store.loadUserTemplates().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("main.tex").path))
+        #expect(FileManager.default.fileExists(atPath: project.appendingPathComponent("main.tex").path))
+    }
+
+    @Test
+    func instantiatesTextbookWithoutOpenRightBlankPages() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let templates = temporary.appendingPathComponent("Templates", isDirectory: true)
+        let projects = temporary.appendingPathComponent("Projects", isDirectory: true)
+        let store = ProjectTemplateStore(userTemplatesDirectory: templates)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let textbook = try #require(
+            ProjectTemplate.builtInTemplates.first { $0.id == "lightex.textbook" }
+        )
+        let project = try store.instantiate(
+            template: textbook,
+            projectName: "Linear Algebra",
+            author: "Author",
+            location: projects
+        )
+        let contents = try String(
+            contentsOf: project.appendingPathComponent("main.tex"),
+            encoding: .utf8
+        )
+
+        #expect(contents.contains("oneside,openany"))
+        #expect(contents.contains("Linear Algebra"))
+        #expect(FileManager.default.fileExists(atPath: project.appendingPathComponent("figures").path))
+        #expect(FileManager.default.fileExists(atPath: project.appendingPathComponent("scripts").path))
+    }
+
+    @Test
+    func rejectsTemplateLibraryNestedInsideItsSource() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let source = temporary.appendingPathComponent("Project", isDirectory: true)
+        let nestedLibrary = source.appendingPathComponent("Templates/Yours", isDirectory: true)
+        let store = ProjectTemplateStore(userTemplatesDirectory: nestedLibrary)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try "\\documentclass{article}\n\\begin{document}\n\\end{document}\n".write(
+            to: source.appendingPathComponent("main.tex"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        #expect(throws: ProjectTemplateError.self) {
+            try store.saveUserTemplate(from: source, name: "Unsafe", summary: "")
+        }
+    }
+
     @Test @MainActor
     func createsEmptyProjectAndKeepsItInRecents() throws {
         let testDefaults = makeIsolatedDefaults()
@@ -607,8 +742,8 @@ struct LighTexTests {
         let contents = try String(contentsOf: mainFile, encoding: .utf8)
         #expect(contents.contains("\\documentclass[11pt]{article}"))
         #expect(contents.contains("\\begin{document}"))
-        #expect(contents.contains("\\begin{titlepage}"))
-        #expect(contents.contains("{\\Huge\\bfseries EmptyBook\\par}"))
+        #expect(!contents.contains("\\begin{titlepage}"))
+        #expect(contents.contains("\\title{EmptyBook}"))
         #expect(contents.contains("\\section{Introduction}"))
         #expect(contents.contains("Start writing here."))
 

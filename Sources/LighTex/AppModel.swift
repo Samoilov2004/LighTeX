@@ -37,14 +37,19 @@ final class AppModel: ObservableObject {
     @Published var showsProblemsPanel = false
     @Published var problemsPanelTab: ProblemsPanelTab = .problems
     @Published var showsCreateProjectSheet = false
+    @Published var showsTemplates = false
+    @Published var templateForNewProject: ProjectTemplate?
+    @Published var templateSourceDraft: TemplateSourceDraft?
     @Published var showsSettingsPanel = false
     @Published var alertMessage: String?
     @Published private(set) var recentProjects: [RecentProject] = []
+    @Published private(set) var userTemplates: [ProjectTemplate] = []
     @Published private(set) var cursorLine = 1
     @Published private(set) var cursorColumn = 1
 
     let settings: AppSettings
     let runtimeManager: RuntimeManager
+    let templateStore: ProjectTemplateStore
 
     private var pendingSaveTask: Task<Void, Never>?
     private var pendingBuildTask: Task<Void, Never>?
@@ -83,14 +88,17 @@ final class AppModel: ObservableObject {
     init(
         settings: AppSettings,
         runtimeManager: RuntimeManager,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        templateStore: ProjectTemplateStore? = nil
     ) {
         self.settings = settings
         self.runtimeManager = runtimeManager
         self.defaults = defaults
+        self.templateStore = templateStore ?? ProjectTemplateStore()
         showsSidebar = defaults.object(forKey: "ui.showsSidebar") as? Bool ?? true
         showsPDF = defaults.object(forKey: "ui.showsPDF") as? Bool ?? true
         recentProjects = loadRecentProjects()
+        userTemplates = self.templateStore.loadUserTemplates()
         runtimeCancellable = runtimeManager.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -122,11 +130,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    convenience init(settings: AppSettings, defaults: UserDefaults = .standard) {
+    convenience init(
+        settings: AppSettings,
+        defaults: UserDefaults = .standard,
+        templateStore: ProjectTemplateStore? = nil
+    ) {
         self.init(
             settings: settings,
             runtimeManager: RuntimeManager(settings: settings, startsAutomatically: false),
-            defaults: defaults
+            defaults: defaults,
+            templateStore: templateStore
         )
     }
 
@@ -160,63 +173,30 @@ final class AppModel: ObservableObject {
     }
 
     func createProject(name: String, location: URL) -> Bool {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              !trimmedName.contains("/"),
-              trimmedName != ".",
-              trimmedName != ".." else {
-            alertMessage = "Enter a valid project name without path separators."
-            return false
-        }
+        createProject(
+            from: .emptyProject,
+            name: name,
+            author: "",
+            location: location
+        )
+    }
 
-        let project = location.appendingPathComponent(trimmedName, isDirectory: true)
-        guard !FileManager.default.fileExists(atPath: project.path) else {
-            alertMessage = "A folder named \(trimmedName) already exists in this location."
-            return false
-        }
-
+    func createProject(
+        from template: ProjectTemplate,
+        name: String,
+        author: String,
+        location: URL
+    ) -> Bool {
         do {
-            try FileManager.default.createDirectory(
-                at: project,
-                withIntermediateDirectories: false
-            )
-            let documentTitle = Self.latexEscaped(trimmedName)
-            let starter = """
-            \\documentclass[11pt]{article}
-
-            \\usepackage[T1]{fontenc}
-            \\usepackage{lmodern}
-            \\usepackage[margin=1in]{geometry}
-            \\usepackage{xcolor}
-
-            \\definecolor{LighTexBlue}{HTML}{2563EB}
-
-            \\begin{document}
-
-            \\begin{titlepage}
-              \\thispagestyle{empty}
-              \\vspace*{0.18\\textheight}
-              {\\color{LighTexBlue}\\rule{1.1in}{4pt}\\par}
-              \\vspace{1.1cm}
-              {\\Huge\\bfseries \(documentTitle)\\par}
-              \\vspace{0.4cm}
-              {\\Large A new LighTex project\\par}
-              \\vfill
-              {\\small Created with LighTex\\par}
-            \\end{titlepage}
-
-            \\section{Introduction}
-
-            Start writing here.
-
-            \\end{document}
-            """
-            try starter.write(
-                to: project.appendingPathComponent("main.tex"),
-                atomically: true,
-                encoding: .utf8
+            let project = try templateStore.instantiate(
+                template: template,
+                projectName: name,
+                author: author,
+                location: location
             )
             showsCreateProjectSheet = false
+            templateForNewProject = nil
+            showsTemplates = false
             openProject(project)
             return true
         } catch {
@@ -225,22 +205,74 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private static func latexEscaped(_ value: String) -> String {
-        value.reduce(into: "") { result, character in
-            switch character {
-            case "\\": result += "\\textbackslash{}"
-            case "{": result += "\\{"
-            case "}": result += "\\}"
-            case "#": result += "\\#"
-            case "$": result += "\\$"
-            case "%": result += "\\%"
-            case "&": result += "\\&"
-            case "_": result += "\\_"
-            case "~": result += "\\textasciitilde{}"
-            case "^": result += "\\textasciicircum{}"
-            default: result.append(character)
-            }
+    func showTemplateLibrary() {
+        userTemplates = templateStore.loadUserTemplates()
+        showsTemplates = true
+    }
+
+    func closeTemplateLibrary() {
+        showsTemplates = false
+    }
+
+    func beginCreatingProject(from template: ProjectTemplate) {
+        templateForNewProject = template
+    }
+
+    func chooseTemplateSourceFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Create Personal Template"
+        panel.message = "Choose a project folder to copy into your personal template library."
+        panel.prompt = "Choose Project"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            templateSourceDraft = TemplateSourceDraft(
+                sourceURL: url.standardizedFileURL,
+                suggestedName: url.lastPathComponent
+            )
         }
+    }
+
+    func beginSavingCurrentProjectAsTemplate() {
+        guard let projectURL else { return }
+        saveAllDocuments()
+        templateSourceDraft = TemplateSourceDraft(
+            sourceURL: projectURL,
+            suggestedName: projectURL.lastPathComponent
+        )
+    }
+
+    func savePersonalTemplate(name: String, summary: String) -> Bool {
+        guard let draft = templateSourceDraft else { return false }
+        do {
+            let template = try templateStore.saveUserTemplate(
+                from: draft.sourceURL,
+                name: name,
+                summary: summary
+            )
+            userTemplates = templateStore.loadUserTemplates()
+            templateSourceDraft = nil
+            alertMessage = "Template “\(template.name)” was saved to Yours."
+            return true
+        } catch {
+            alertMessage = "LighTex could not create the template: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func deletePersonalTemplate(_ template: ProjectTemplate) {
+        do {
+            try templateStore.deleteUserTemplate(template)
+            userTemplates = templateStore.loadUserTemplates()
+        } catch {
+            alertMessage = "LighTex could not delete the template: \(error.localizedDescription)"
+        }
+    }
+
+    func revealPersonalTemplate(_ template: ProjectTemplate) {
+        guard let directory = template.userDirectory else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([directory])
     }
 
     func openRecentProject(_ project: RecentProject) {
@@ -269,6 +301,7 @@ final class AppModel: ObservableObject {
         buildQueuedWhileBuilding = false
 
         let standardizedURL = url.standardizedFileURL
+        showsTemplates = false
         projectURL = standardizedURL
         projectTree = ProjectScanner.projectTree(in: standardizedURL)
         let texFiles = ProjectScanner.texFiles(in: standardizedURL)
@@ -328,6 +361,7 @@ final class AppModel: ObservableObject {
         pendingBuildTask?.cancel()
         buildQueuedWhileBuilding = false
         projectURL = nil
+        showsTemplates = false
         projectTree = []
         outlineItems = []
         entryFileURL = nil

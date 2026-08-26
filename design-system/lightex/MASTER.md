@@ -47,6 +47,8 @@ This file is the visual source of truth for the native macOS application.
 - Small control radius: native 6–8 pt behavior.
 - Settings use a 420 pt trailing overlay with native Form sections and a system segmented control.
 - The project hub toolbar exposes only Settings; project creation and opening remain in the main content.
+- The Templates library is a full in-window hub view with no search while the catalog is small. `Yours` always appears first, followed by bundled LighTex templates in an adaptive grid.
+- An empty `Yours` section explains personal templates and provides a visible Create Template action; personal templates are independent copies and never modify their source projects.
 - First-run TeX setup is a required, content-area onboarding flow with Minimal, Standard, and Full runtime choices.
 - Hover backgrounds may use black at roughly 4–5% opacity without movement or scaling.
 - Active editor tab: white surface and medium-weight title, without an accent baseline.

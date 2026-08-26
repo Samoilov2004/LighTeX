@@ -13,6 +13,9 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         prepareSnapshotWindow()
+        if ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_SHOW_TEMPLATES"] == "1" {
+            snapshotModel?.showTemplateLibrary()
+        }
         if ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_SHOW_SETTINGS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.snapshotModel?.showsSettingsPanel = true
@@ -69,7 +72,7 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = model.hasProject ? model.projectName : "LighTex"
+        window.title = model.hasProject ? model.projectName : (model.showsTemplates ? "Templates" : "LighTex")
         window.toolbarStyle = .unified
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
@@ -169,7 +172,11 @@ struct LighTexApp: App {
                 .environmentObject(model)
                 .environmentObject(settings)
                 .environmentObject(runtimeManager)
-                .navigationTitle(model.hasProject ? model.projectName : "LighTex")
+                .navigationTitle(
+                    model.hasProject
+                        ? model.projectName
+                        : (model.showsTemplates ? "Templates" : "LighTex")
+                )
                 .frame(minWidth: 820, minHeight: 600)
         }
         .windowStyle(.titleBar)
@@ -188,6 +195,11 @@ struct LighTexApp: App {
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(!runtimeManager.isSetupComplete)
+
+                Button("New from Template…") {
+                    model.showTemplateLibrary()
+                }
+                .disabled(!runtimeManager.isSetupComplete || model.hasProject)
 
                 if model.hasProject {
                     Divider()
@@ -217,6 +229,13 @@ struct LighTexApp: App {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
                 .disabled(model.openDocuments.isEmpty)
+
+                Divider()
+
+                Button("Save Project as Template…") {
+                    model.beginSavingCurrentProjectAsTemplate()
+                }
+                .disabled(!model.hasProject)
             }
 
             CommandGroup(after: .toolbar) {

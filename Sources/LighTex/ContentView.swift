@@ -13,6 +13,8 @@ struct ContentView: View {
                     RuntimeSetupView()
                 } else if model.hasProject {
                     WorkspaceView()
+                } else if model.showsTemplates {
+                    TemplatesView()
                 } else {
                     WelcomeView()
                 }
@@ -49,7 +51,13 @@ struct ContentView: View {
             unifiedToolbar
         }
         .sheet(isPresented: $model.showsCreateProjectSheet) {
-            CreateProjectSheet()
+            CreateProjectSheet(template: nil)
+        }
+        .sheet(item: $model.templateForNewProject) { template in
+            CreateProjectSheet(template: template)
+        }
+        .sheet(item: $model.templateSourceDraft) { draft in
+            CreateTemplateSheet(draft: draft)
         }
         .alert(
             "LighTex",
@@ -71,7 +79,16 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var unifiedToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            if model.hasProject {
+            if model.showsTemplates, !model.hasProject {
+                Button {
+                    model.closeTemplateLibrary()
+                } label: {
+                    Label("Projects", systemImage: "chevron.backward")
+                }
+                .labelStyle(.titleAndIcon)
+                .help("Back to Projects")
+                .accessibilityLabel("Back to Projects")
+            } else if model.hasProject {
                 Button {
                     model.closeProject()
                 } label: {
@@ -253,20 +270,13 @@ private struct WelcomeView: View {
             .controlSize(.large)
 
             Button {
-                // Template projects are intentionally reserved for a later release.
+                model.showTemplateLibrary()
             } label: {
                 Label("New from Template", systemImage: "square.grid.2x2")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(true)
-            .help("Coming soon")
-
-            Text("Templates are coming soon.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .padding(.leading, 3)
         }
     }
 
@@ -376,10 +386,428 @@ private struct RecentProjectRow: View {
     }
 }
 
+private struct TemplatesView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var templatePendingDeletion: ProjectTemplate?
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 180, maximum: 230), spacing: 22, alignment: .top)
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Templates")
+                        .font(.system(size: 28, weight: .semibold))
+                    Text("Start with a LighTex design or reuse one of your own projects.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 34)
+
+                templateSectionHeader("Yours") {
+                    if !model.userTemplates.isEmpty {
+                        Button {
+                            model.chooseTemplateSourceFolder()
+                        } label: {
+                            Label("Create Template", systemImage: "plus")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityHint("Choose a project folder to save as a reusable template")
+                    }
+                }
+
+                if model.userTemplates.isEmpty {
+                    PersonalTemplatesEmptyState {
+                        model.chooseTemplateSourceFolder()
+                    }
+                    .padding(.top, 10)
+                } else {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
+                        ForEach(model.userTemplates) { template in
+                            TemplateCard(
+                                template: template,
+                                onUse: { model.beginCreatingProject(from: template) },
+                                onReveal: { model.revealPersonalTemplate(template) },
+                                onDelete: { templatePendingDeletion = template }
+                            )
+                        }
+                    }
+                    .padding(.top, 14)
+                }
+
+                templateSectionHeader("LighTex Templates")
+                    .padding(.top, 38)
+
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
+                    ForEach(ProjectTemplate.builtInTemplates) { template in
+                        TemplateCard(
+                            template: template,
+                            onUse: { model.beginCreatingProject(from: template) }
+                        )
+                    }
+                }
+                .padding(.top, 14)
+            }
+            .frame(maxWidth: 1_040, alignment: .leading)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 44)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .background(Color.white)
+        .alert(
+            "Delete Template?",
+            isPresented: Binding(
+                get: { templatePendingDeletion != nil },
+                set: { if !$0 { templatePendingDeletion = nil } }
+            )
+        ) {
+            Button("Delete Template", role: .destructive) {
+                if let templatePendingDeletion {
+                    model.deletePersonalTemplate(templatePendingDeletion)
+                }
+                templatePendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) {
+                templatePendingDeletion = nil
+            }
+        } message: {
+            Text("This removes only the reusable template. The original project and projects previously created from it will remain on your Mac.")
+        }
+    }
+
+    @ViewBuilder
+    private func templateSectionHeader<Trailing: View>(
+        _ title: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(alignment: .center) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+            Spacer()
+            trailing()
+        }
+    }
+
+    private func templateSectionHeader(_ title: String) -> some View {
+        templateSectionHeader(title) { EmptyView() }
+    }
+}
+
+private struct PersonalTemplatesEmptyState: View {
+    let create: () -> Void
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Image(systemName: "square.on.square.dashed")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text("No personal templates yet")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Save a project as a template and reuse it later.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Button("Create Template", action: create)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 3)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+        }
+    }
+}
+
+private struct TemplateCard: View {
+    let template: ProjectTemplate
+    let onUse: () -> Void
+    var onReveal: (() -> Void)?
+    var onDelete: (() -> Void)?
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onUse) {
+            VStack(alignment: .leading, spacing: 10) {
+                TemplatePagePreview(style: template.previewStyle)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(
+                                isHovering
+                                    ? Color.accentColor.opacity(0.75)
+                                    : Color(nsColor: .separatorColor).opacity(0.65),
+                                lineWidth: isHovering ? 1.5 : 1
+                            )
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(template.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(template.summary)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(template.runtimeRequirement)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("Use \(template.name) template")
+        .accessibilityHint(template.summary)
+        .contextMenu {
+            Button("Use Template", action: onUse)
+            if let onReveal {
+                Divider()
+                Button("Reveal in Finder", action: onReveal)
+            }
+            if let onDelete {
+                Divider()
+                Button("Delete Template", role: .destructive, action: onDelete)
+            }
+        }
+    }
+}
+
+private struct TemplatePagePreview: View {
+    let style: TemplatePreviewStyle
+
+    var body: some View {
+        ZStack {
+            Color.white
+            switch style {
+            case .article:
+                articlePreview
+            case .mathematics:
+                mathematicsPreview
+            case .textbook:
+                textbookPreview
+            case .presentation:
+                presentationPreview
+            }
+        }
+        .frame(height: 216)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .shadow(color: .black.opacity(0.055), radius: 5, y: 2)
+        .accessibilityHidden(true)
+    }
+
+    private var articlePreview: some View {
+        VStack(spacing: 8) {
+            Text("ARTICLE TITLE")
+                .font(.system(size: 11, weight: .bold, design: .serif))
+            Text("Author Name")
+                .font(.system(size: 6.5, design: .serif))
+                .foregroundStyle(.secondary)
+            Divider().padding(.vertical, 3)
+            previewHeading("Abstract")
+            previewLines([0.92, 0.84, 0.76])
+            previewHeading("1  Introduction")
+            previewLines([0.95, 0.88, 0.91, 0.68])
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 25)
+    }
+
+    private var mathematicsPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("MATHEMATICAL NOTES")
+                .font(.system(size: 10.5, weight: .bold, design: .serif))
+            previewHeading("1  Foundations")
+            previewLines([0.94, 0.79])
+            HStack(spacing: 4) {
+                Text("THEOREM 1.1")
+                    .font(.system(size: 6.5, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                previewLine(width: 0.46)
+            }
+            Text("a² + b² = c²")
+                .font(.system(size: 12, weight: .medium, design: .serif))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+            previewHeading("Proof")
+            previewLines([0.9, 0.83, 0.63])
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 24)
+    }
+
+    private var textbookPreview: some View {
+        ZStack(alignment: .topLeading) {
+            Color(red: 0.075, green: 0.11, blue: 0.16)
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: 4)
+                .padding(.leading, 24)
+                .padding(.vertical, 26)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("A CONCISE TEXTBOOK")
+                    .font(.system(size: 6.5, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Spacer().frame(height: 19)
+                Text("CORE")
+                Text("MATHEMATICS")
+                Text("Ideas, structure, and patterns")
+                    .font(.system(size: 7, design: .serif))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .padding(.top, 3)
+                Spacer()
+                Text("AUTHOR NAME")
+                    .font(.system(size: 6.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            .font(.system(size: 17, weight: .bold, design: .serif))
+            .foregroundStyle(.white)
+            .padding(.leading, 39)
+            .padding(.trailing, 16)
+            .padding(.vertical, 28)
+        }
+    }
+
+    private var presentationPreview: some View {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
+            VStack(alignment: .leading, spacing: 9) {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 3)
+                Spacer()
+                Text("THE CENTRAL IDEA")
+                    .font(.system(size: 12, weight: .bold))
+                Text("A clear presentation starts with one strong question.")
+                    .font(.system(size: 7.5))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Circle().fill(Color.accentColor).frame(width: 4, height: 4)
+                    previewLine(width: 0.62)
+                }
+                HStack(spacing: 5) {
+                    Circle().fill(Color.accentColor).frame(width: 4, height: 4)
+                    previewLine(width: 0.48)
+                }
+                Spacer()
+            }
+            .padding(18)
+            .background(Color.white)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .padding(14)
+            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+        }
+    }
+
+    private func previewHeading(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 7.5, weight: .bold, design: .serif))
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func previewLines(_ widths: [CGFloat]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(widths.enumerated()), id: \.offset) { _, width in
+                previewLine(width: width)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func previewLine(width: CGFloat) -> some View {
+        GeometryReader { geometry in
+            Capsule()
+                .fill(Color.primary.opacity(0.14))
+                .frame(width: geometry.size.width * width, height: 2.5)
+        }
+        .frame(height: 2.5)
+    }
+}
+
+private struct CreateTemplateSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let draft: TemplateSourceDraft
+    @State private var name: String
+    @State private var summary = ""
+
+    init(draft: TemplateSourceDraft) {
+        self.draft = draft
+        _name = State(initialValue: draft.suggestedName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Create Personal Template")
+                .font(.system(size: 17, weight: .semibold))
+            Text("LighTex copies the project into Yours. The original folder will not be changed.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            Form {
+                TextField("Template Name", text: $name)
+                TextField("Description", text: $summary)
+                LabeledContent("Source") {
+                    Text(draft.sourceURL.path(percentEncoded: false))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(draft.sourceURL.path(percentEncoded: false))
+                }
+            }
+            .formStyle(.grouped)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Build files, generated PDFs, and Git metadata are excluded automatically.")
+                Text("Optional placeholders: ${PROJECT_NAME}, ${AUTHOR}, and ${DATE}.")
+                    .fontDesign(.monospaced)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    model.templateSourceDraft = nil
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Create Template") {
+                    if model.savePersonalTemplate(name: name, summary: summary) {
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 335)
+        .preferredColorScheme(.light)
+    }
+}
+
 private struct CreateProjectSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    let template: ProjectTemplate?
     @State private var projectName = ""
+    @State private var author = NSFullUserName()
     @State private var location = FileManager.default.urls(
         for: .documentDirectory,
         in: .userDomainMask
@@ -387,15 +815,19 @@ private struct CreateProjectSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("New Empty Project")
+            Text(template.map { "New from \($0.name)" } ?? "New Empty Project")
                 .font(.system(size: 17, weight: .semibold))
 
-            Text("Creates a clean project with a minimal main.tex document.")
+            Text(template?.summary ?? "Creates a clean project with a minimal main.tex document.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
 
             Form {
                 TextField("Project Name", text: $projectName)
+
+                if template != nil {
+                    TextField("Author", text: $author)
+                }
 
                 LabeledContent("Location") {
                     HStack(spacing: 8) {
@@ -422,7 +854,18 @@ private struct CreateProjectSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("Create") {
-                    if model.createProject(name: projectName, location: location) {
+                    let created: Bool
+                    if let template {
+                        created = model.createProject(
+                            from: template,
+                            name: projectName,
+                            author: author,
+                            location: location
+                        )
+                    } else {
+                        created = model.createProject(name: projectName, location: location)
+                    }
+                    if created {
                         dismiss()
                     }
                 }
@@ -432,7 +875,7 @@ private struct CreateProjectSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 470, height: 250)
+        .frame(width: 470, height: template == nil ? 250 : 290)
         .preferredColorScheme(.light)
     }
 
