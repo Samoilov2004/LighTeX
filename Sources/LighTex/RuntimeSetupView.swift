@@ -105,17 +105,29 @@ struct RuntimeSetupView: View {
                     }
                 }
             } else if let error = runtimeManager.manifestError {
-                HStack(alignment: .firstTextBaseline) {
-                    Label(error, systemImage: "wifi.exclamationmark")
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("Runtime Catalog Is Offline")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(error)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Retry") {
+                        .multilineTextAlignment(.center)
+                    if !runtimeManager.systemStatus.hasAnyEngine {
+                        Text("Projects remain unavailable until LighTex can verify and install a TeX environment.")
+                            .font(.system(size: 12, weight: .medium))
+                            .multilineTextAlignment(.center)
+                    }
+                    Button("Retry Connection") {
                         runtimeManager.retryManifest()
                     }
+                    .buttonStyle(.borderedProminent)
                 }
                 .padding(18)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 190)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
@@ -161,12 +173,21 @@ struct RuntimeSetupView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 if selected {
-                    Button("Install \(variant.label)") {
-                        runtimeManager.install(variant)
+                    if runtimeManager.systemStatus.hasAnyEngine {
+                        Button("Install \(variant.label)") {
+                            runtimeManager.install(variant)
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                        .disabled(runtimeManager.installState.isBusy)
+                    } else {
+                        Button("Install \(variant.label)") {
+                            runtimeManager.install(variant)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                        .disabled(runtimeManager.installState.isBusy)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
-                    .disabled(runtimeManager.installState.isBusy)
                 } else {
                     Button("Select") {
                         selectedVariant = variant

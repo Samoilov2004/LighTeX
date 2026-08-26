@@ -78,6 +78,12 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var unifiedToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+        }
+
         ToolbarItemGroup(placement: .navigation) {
             if model.showsTemplates, !model.hasProject {
                 Button {
@@ -538,7 +544,7 @@ private struct TemplateCard: View {
     var body: some View {
         Button(action: onUse) {
             VStack(alignment: .leading, spacing: 10) {
-                TemplatePagePreview(style: template.previewStyle)
+                TemplatePreviewSurface(template: template)
                     .overlay {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .stroke(
@@ -582,6 +588,29 @@ private struct TemplateCard: View {
                 Button("Delete Template", role: .destructive, action: onDelete)
             }
         }
+    }
+}
+
+private struct TemplatePreviewSurface: View {
+    let template: ProjectTemplate
+
+    var body: some View {
+        Group {
+            if let previewURL = template.previewURL,
+               let image = NSImage(contentsOf: previewURL) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(7)
+                    .background(Color.white)
+            } else {
+                TemplatePagePreview(style: template.previewStyle)
+            }
+        }
+        .frame(height: 216)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .shadow(color: .black.opacity(0.055), radius: 5, y: 2)
+        .accessibilityHidden(true)
     }
 }
 
@@ -744,6 +773,9 @@ private struct CreateTemplateSheet: View {
     let draft: TemplateSourceDraft
     @State private var name: String
     @State private var summary = ""
+    @State private var review: TemplateCopyReview?
+    @State private var showsIncludedFiles = false
+    @State private var showsExcludedFiles = true
 
     init(draft: TemplateSourceDraft) {
         self.draft = draft
@@ -771,8 +803,27 @@ private struct CreateTemplateSheet: View {
             }
             .formStyle(.grouped)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Build files, generated PDFs, and Git metadata are excluded automatically.")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Review what the reusable template will contain")
+                    .font(.system(size: 12, weight: .semibold))
+                if let review {
+                    DisclosureGroup(
+                        "Included — \(review.included.count) files",
+                        isExpanded: $showsIncludedFiles
+                    ) {
+                        reviewFileList(review.included)
+                    }
+                    DisclosureGroup(
+                        "Excluded — \(review.excluded.count) items",
+                        isExpanded: $showsExcludedFiles
+                    ) {
+                        reviewFileList(review.excluded)
+                    }
+                } else {
+                    ProgressView("Inspecting project…")
+                        .controlSize(.small)
+                }
+                Text("Secrets, private keys, Git metadata, build files, caches, and generated PDFs are always excluded.")
                 Text("Optional placeholders: ${PROJECT_NAME}, ${AUTHOR}, and ${DATE}.")
                     .fontDesign(.monospaced)
             }
@@ -793,12 +844,43 @@ private struct CreateTemplateSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || review == nil
+                )
             }
         }
         .padding(20)
-        .frame(width: 520, height: 335)
+        .frame(width: 560, height: 520)
         .preferredColorScheme(.light)
+        .task {
+            review = model.templateCopyReview(for: draft.sourceURL)
+        }
+    }
+
+    @ViewBuilder
+    private func reviewFileList(_ entries: [TemplateReviewEntry]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(entries) { entry in
+                    HStack(spacing: 6) {
+                        Image(systemName: entry.reason == nil ? "doc" : "nosign")
+                            .foregroundStyle(.secondary)
+                        Text(entry.relativePath)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let reason = entry.reason {
+                            Spacer()
+                            Text(reason)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 10.5))
+                }
+            }
+        }
+        .frame(maxHeight: 82)
+        .padding(.top, 4)
     }
 }
 

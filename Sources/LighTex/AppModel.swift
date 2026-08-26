@@ -74,6 +74,7 @@ final class AppModel: ObservableObject {
     @Published var alertMessage: String?
     @Published private(set) var recentProjects: [RecentProject] = []
     @Published private(set) var userTemplates: [ProjectTemplate] = []
+    @Published private(set) var appUpdateState: AppUpdateState = .idle
     @Published private(set) var cursorLine = 1
     @Published private(set) var cursorColumn = 1
 
@@ -300,11 +301,45 @@ final class AppModel: ObservableObject {
             userTemplates = templateStore.loadUserTemplates()
             templateSourceDraft = nil
             alertMessage = "Template “\(template.name)” was saved to Yours."
+            if let configuration = try? runtimeManager.buildConfiguration(
+                engine: settings.latexEngine,
+                tool: settings.buildTool
+            ) {
+                Task { [weak self] in
+                    await TemplatePreviewService.generate(
+                        for: template,
+                        configuration: configuration
+                    )
+                    guard let self else { return }
+                    self.userTemplates = self.templateStore.loadUserTemplates()
+                }
+            }
             return true
         } catch {
             alertMessage = "LighTex could not create the template: \(error.localizedDescription)"
             return false
         }
+    }
+
+    func templateCopyReview(for sourceURL: URL) -> TemplateCopyReview? {
+        try? templateStore.reviewProjectContents(from: sourceURL)
+    }
+
+    func checkForAppUpdates() {
+        guard appUpdateState != .checking else { return }
+        appUpdateState = .checking
+        let currentVersion = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "0.0.0"
+        Task { [weak self] in
+            let result = await AppUpdateService.check(currentVersion: currentVersion)
+            self?.appUpdateState = result
+        }
+    }
+
+    func openAvailableAppUpdate() {
+        guard case let .available(_, releaseURL) = appUpdateState else { return }
+        NSWorkspace.shared.open(releaseURL)
     }
 
     func deletePersonalTemplate(_ template: ProjectTemplate) {

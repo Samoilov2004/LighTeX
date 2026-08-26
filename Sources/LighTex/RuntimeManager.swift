@@ -30,6 +30,9 @@ final class RuntimeManager: ObservableObject {
     @Published private(set) var manifestError: String?
     @Published private(set) var isInstallingPackage = false
     @Published private(set) var packageOperationMessage: String?
+    @Published private(set) var installedRuntimes: [InstalledRuntime] = []
+    @Published private(set) var cacheUsage = RuntimeCacheUsage()
+    @Published private(set) var storageOperationMessage: String?
 
     let settings: AppSettings
 
@@ -117,6 +120,7 @@ final class RuntimeManager: ObservableObject {
         }
 
         await loadManifest()
+        await refreshStorageInfo()
         if settings.texProvider == nil,
            let rawVariant = ProcessInfo.processInfo.environment["LIGHTEX_RUNTIME_AUTOINSTALL_VARIANT"],
            let variant = RuntimeVariant(rawValue: rawVariant) {
@@ -140,6 +144,7 @@ final class RuntimeManager: ObservableObject {
         activeStatus = systemStatus
         selectFirstAvailableEngineIfNeeded(in: systemStatus)
         installState = .idle
+        Task { await refreshStorageInfo() }
     }
 
     func useManagedRuntime() {
@@ -150,8 +155,113 @@ final class RuntimeManager: ObservableObject {
             settings.texProvider = .managed
             selectFirstAvailableEngineIfNeeded(in: status)
             installState = .ready(record)
+            Task { await refreshStorageInfo() }
         } catch {
             installState = .failed(error.localizedDescription)
+        }
+    }
+
+    func useInstalledRuntime(_ installed: InstalledRuntime) {
+        guard !installState.isBusy else { return }
+        do {
+            let base = try Self.runtimeBaseDirectory().standardizedFileURL
+            let recordURL = installed.recordURL.standardizedFileURL
+            guard Self.isDescendant(recordURL, of: base) else {
+                throw RuntimeError.invalidToolPath(recordURL.path)
+            }
+            let status = try ToolchainService.status(for: installed.record)
+            settings.managedRuntimeRecordPath = recordURL.path
+            settings.texProvider = .managed
+            activeStatus = status
+            selectFirstAvailableEngineIfNeeded(in: status)
+            installState = .ready(installed.record)
+            Task { await refreshStorageInfo() }
+        } catch {
+            storageOperationMessage = error.localizedDescription
+        }
+    }
+
+    func removeInstalledRuntime(_ installed: InstalledRuntime) {
+        guard !installed.isActive, !installState.isBusy else {
+            storageOperationMessage = "Switch to another TeX environment before removing the active runtime."
+            return
+        }
+        do {
+            let base = try Self.runtimeBaseDirectory().standardizedFileURL
+            let root = installed.rootURL.standardizedFileURL
+            guard Self.isDescendant(root, of: base), root != base else {
+                throw RuntimeError.invalidToolPath(root.path)
+            }
+            try FileManager.default.removeItem(at: root)
+            storageOperationMessage = "Removed runtime (installed.record.runtimeVersion)."
+            Task { await refreshStorageInfo() }
+        } catch {
+            storageOperationMessage = "Could not remove the runtime: (error.localizedDescription)"
+        }
+    }
+
+    func clearRuntimeDownloadsAndStaging() {
+        do {
+            let base = try Self.runtimeBaseDirectory().standardizedFileURL
+            for child in try FileManager.default.contentsOfDirectory(
+                at: base,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: []
+            ) {
+                let name = child.lastPathComponent
+                guard name == "Downloads" || name.hasPrefix(".staging-") || name.hasPrefix(".backup-") else {
+                    continue
+                }
+                try FileManager.default.removeItem(at: child)
+            }
+            try FileManager.default.createDirectory(
+                at: base.appendingPathComponent("Downloads", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            storageOperationMessage = "Runtime downloads and incomplete installations were cleared."
+            Task { await refreshStorageInfo() }
+        } catch {
+            storageOperationMessage = "Could not clear runtime downloads: (error.localizedDescription)"
+        }
+    }
+
+    func clearBuildCache() {
+        do {
+            let root = try LatexBuildService.buildsRootDirectory(create: false)
+            if FileManager.default.fileExists(atPath: root.path) {
+                try FileManager.default.removeItem(at: root)
+            }
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            storageOperationMessage = "The LaTeX build cache was cleared."
+            Task { await refreshStorageInfo() }
+        } catch {
+            storageOperationMessage = "Could not clear the build cache: (error.localizedDescription)"
+        }
+    }
+
+    func refreshStorageInfo() async {
+        do {
+            let base = try Self.runtimeBaseDirectory()
+            let activePath = settings.texProvider == .managed
+                ? settings.managedRuntimeRecordPath
+                : nil
+            let snapshot = try await Task.detached(priority: .utility) {
+                let runtimes = try Self.scanInstalledRuntimes(
+                    in: base,
+                    activeRecordPath: activePath
+                )
+                let runtimeCache = try Self.runtimeCacheSize(in: base)
+                let buildRoot = try LatexBuildService.buildsRootDirectory(create: false)
+                let buildCache = Self.directorySize(at: buildRoot)
+                return (runtimes, RuntimeCacheUsage(
+                    downloadsAndStaging: runtimeCache,
+                    buildCache: buildCache
+                ))
+            }.value
+            installedRuntimes = snapshot.0
+            cacheUsage = snapshot.1
+        } catch {
+            storageOperationMessage = "Could not inspect runtime storage: (error.localizedDescription)"
         }
     }
 
@@ -359,6 +469,7 @@ final class RuntimeManager: ObservableObject {
             activeStatus = try ToolchainService.status(for: record)
             selectFirstAvailableEngineIfNeeded(in: activeStatus)
             installState = .ready(record)
+            await refreshStorageInfo()
         } catch is CancellationError {
             installState = .idle
         } catch {
@@ -501,6 +612,80 @@ final class RuntimeManager: ObservableObject {
     nonisolated static func readRecord(at url: URL) -> ManagedRuntimeRecord? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ManagedRuntimeRecord.self, from: data)
+    }
+
+    nonisolated static func scanInstalledRuntimes(
+        in baseDirectory: URL,
+        activeRecordPath: String?
+    ) throws -> [InstalledRuntime] {
+        let base = baseDirectory.standardizedFileURL
+        guard let enumerator = FileManager.default.enumerator(
+            at: base,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        ) else { return [] }
+        var result: [InstalledRuntime] = []
+        while let item = enumerator.nextObject() as? URL {
+            guard item.lastPathComponent == ".lightex-runtime.json",
+                  let record = readRecord(at: item) else { continue }
+            let recordURL = item.standardizedFileURL
+            let rootURL = URL(fileURLWithPath: record.rootPath, isDirectory: true).standardizedFileURL
+            guard recordURL.deletingLastPathComponent() == rootURL,
+                  isDescendant(rootURL, of: base),
+                  FileManager.default.fileExists(atPath: rootURL.path),
+                  (try? ToolchainService.status(for: record)) != nil else {
+                continue
+            }
+            result.append(InstalledRuntime(
+                recordURL: recordURL,
+                record: record,
+                installedSize: directorySize(at: rootURL),
+                isActive: recordURL.path == activeRecordPath
+            ))
+            enumerator.skipDescendants()
+        }
+        return result.sorted {
+            if $0.record.runtimeVersion == $1.record.runtimeVersion {
+                return $0.record.variant.label < $1.record.variant.label
+            }
+            return $0.record.runtimeVersion.localizedStandardCompare($1.record.runtimeVersion) == .orderedDescending
+        }
+    }
+
+    nonisolated static func directorySize(at root: URL) -> Int64 {
+        guard FileManager.default.fileExists(atPath: root.path),
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey],
+                options: [.skipsPackageDescendants]
+              ) else { return 0 }
+        var total: Int64 = 0
+        while let item = enumerator.nextObject() as? URL {
+            guard let values = try? item.resourceValues(forKeys: [
+                .isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey
+            ]), values.isRegularFile == true else { continue }
+            total += Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+        }
+        return total
+    }
+
+    nonisolated static func runtimeCacheSize(in base: URL) throws -> Int64 {
+        try FileManager.default.contentsOfDirectory(
+            at: base,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+        .filter {
+            let name = $0.lastPathComponent
+            return name == "Downloads" || name.hasPrefix(".staging-") || name.hasPrefix(".backup-")
+        }
+        .reduce(0) { $0 + directorySize(at: $1) }
+    }
+
+    nonisolated static func isDescendant(_ candidate: URL, of root: URL) -> Bool {
+        let candidatePath = candidate.standardizedFileURL.path
+        let rootPath = root.standardizedFileURL.path
+        return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
     }
 
     private static func checkDiskSpace(at url: URL, required: Int64) throws {

@@ -114,6 +114,21 @@ struct ManagedRuntimeRecord: Codable, Equatable, Sendable {
     let tools: [String: String]
 }
 
+struct InstalledRuntime: Identifiable, Equatable, Sendable {
+    let recordURL: URL
+    let record: ManagedRuntimeRecord
+    let installedSize: Int64
+    let isActive: Bool
+
+    var id: String { recordURL.standardizedFileURL.path }
+    var rootURL: URL { URL(fileURLWithPath: record.rootPath, isDirectory: true) }
+}
+
+struct RuntimeCacheUsage: Equatable, Sendable {
+    var downloadsAndStaging: Int64 = 0
+    var buildCache: Int64 = 0
+}
+
 struct RuntimeDownloadProgress: Equatable, Sendable {
     let receivedBytes: Int64
     let totalBytes: Int64

@@ -677,6 +677,128 @@ struct LighTexTests {
     }
 
     @Test
+    func personalTemplateReviewExcludesSecretsAndWritesV2Manifest() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let source = temporary.appendingPathComponent("Source", isDirectory: true)
+        let library = temporary.appendingPathComponent("Templates", isDirectory: true)
+        let store = ProjectTemplateStore(userTemplatesDirectory: library)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        try "\\documentclass{article}".write(
+            to: source.appendingPathComponent("main.tex"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "TOKEN=secret".write(
+            to: source.appendingPathComponent(".env.local"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "PRIVATE".write(
+            to: source.appendingPathComponent("author.key"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "notes".write(
+            to: source.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let review = try store.reviewProjectContents(from: source)
+        #expect(review.included.map(\.relativePath).contains("main.tex"))
+        #expect(review.included.map(\.relativePath).contains("README.md"))
+        #expect(review.excluded.map(\.relativePath).contains(".env.local"))
+        #expect(review.excluded.map(\.relativePath).contains("author.key"))
+
+        let template = try store.saveUserTemplate(from: source, name: "Safe", summary: "")
+        let directory = try #require(template.userDirectory)
+        let files = directory.appendingPathComponent("files", isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: files.appendingPathComponent(".env.local").path))
+        #expect(!FileManager.default.fileExists(atPath: files.appendingPathComponent("author.key").path))
+        let manifestData = try Data(contentsOf: directory.appendingPathComponent("manifest.json"))
+        let manifest = try #require(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        #expect(manifest["schemaVersion"] as? Int == 2)
+        #expect(manifest["previewFile"] as? String == "preview.png")
+    }
+
+    @Test
+    func stillLoadsV1PersonalTemplateManifest() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directory = temporary.appendingPathComponent("legacy", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("files", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try "\\documentclass{article}".write(
+            to: directory.appendingPathComponent("files/main.tex"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let manifest = """
+        {"schemaVersion":1,"id":"legacy","name":"Legacy","summary":"","createdAt":"2026-08-26T00:00:00Z","entryFile":"main.tex","previewStyle":"article"}
+        """
+        try manifest.write(
+            to: directory.appendingPathComponent("manifest.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let templates = ProjectTemplateStore(userTemplatesDirectory: temporary).loadUserTemplates()
+        #expect(templates.map(\.id) == ["legacy"])
+    }
+
+    @Test
+    func comparesGitHubReleaseVersionsWithoutInstallingCode() {
+        #expect(AppUpdateService.compare("v0.6.0", "0.5.2") == .orderedDescending)
+        #expect(AppUpdateService.compare("v0.5.2", "0.5.2") == .orderedSame)
+        #expect(AppUpdateService.compare("v1.0.0-beta", "1.0.0") == .orderedAscending)
+    }
+
+    @Test
+    func inventoriesOnlyValidManagedRuntimesAndMeasuresStorage() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let root = temporary.appendingPathComponent("2026/standard/arm64", isDirectory: true)
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let executable = bin.appendingPathComponent("pdflatex")
+        try "#!/bin/sh\necho 'pdfTeX 3.14'\n".write(
+            to: executable,
+            atomically: true,
+            encoding: .utf8
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+        let record = ManagedRuntimeRecord(
+            runtimeVersion: "2026.1",
+            texLiveYear: 2026,
+            variant: .standard,
+            architecture: .arm64,
+            rootPath: root.path,
+            tools: ["pdflatex": "bin/pdflatex"]
+        )
+        let recordURL = root.appendingPathComponent(".lightex-runtime.json")
+        try JSONEncoder().encode(record).write(to: recordURL, options: .atomic)
+
+        let installed = try RuntimeManager.scanInstalledRuntimes(
+            in: temporary,
+            activeRecordPath: recordURL.path
+        )
+        #expect(installed.count == 1)
+        #expect(installed.first?.isActive == true)
+        #expect(installed.first?.installedSize ?? 0 > 0)
+        #expect(RuntimeManager.directorySize(at: root) > 0)
+    }
+
+    @Test
     func instantiatesTextbookWithoutOpenRightBlankPages() throws {
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

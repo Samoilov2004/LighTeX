@@ -65,9 +65,11 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .overlay(alignment: .leading) {
-            Divider()
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
         }
         .onAppear {
             closeButtonFocused = true
@@ -96,6 +98,13 @@ private struct GeneralSettingsView: View {
                 }
                 .disabled(model.recentProjects.isEmpty)
             }
+            Section("Updates") {
+                updateStatus
+                Button("Check for Updates") {
+                    model.checkForAppUpdates()
+                }
+                .disabled(model.appUpdateState == .checking)
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -110,6 +119,35 @@ private struct GeneralSettingsView: View {
         } message: {
             Text("This removes all projects from LighTex's recent-projects list. Your project folders and files will remain on your Mac.")
         }
+    }
+
+    @ViewBuilder
+    private var updateStatus: some View {
+        switch model.appUpdateState {
+        case .idle:
+            LabeledContent("LighTex", value: currentVersion)
+        case .checking:
+            ProgressView("Checking GitHub Releases…")
+                .controlSize(.small)
+        case .upToDate:
+            Label("LighTex is up to date", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.secondary)
+        case let .available(version, _):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Version \(version) is available", systemImage: "arrow.down.circle")
+                Button("Open Release Page") {
+                    model.openAvailableAppUpdate()
+                }
+            }
+        case let .failed(message):
+            Label(message, systemImage: "wifi.exclamationmark")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development build"
     }
 }
 
@@ -148,6 +186,9 @@ private struct LatexSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var runtimeManager: RuntimeManager
     @State private var selectedVariant: RuntimeVariant = .standard
+    @State private var runtimePendingRemoval: InstalledRuntime?
+    @State private var confirmsClearingRuntimeCache = false
+    @State private var confirmsClearingBuildCache = false
 
     var body: some View {
         Form {
@@ -202,6 +243,40 @@ private struct LatexSettingsView: View {
                 RuntimeProgressView()
             }
 
+            if !runtimeManager.installedRuntimes.isEmpty {
+                Section("Installed Runtimes") {
+                    ForEach(runtimeManager.installedRuntimes) { runtime in
+                        installedRuntimeRow(runtime)
+                    }
+                }
+            }
+
+            Section("Storage") {
+                LabeledContent(
+                    "Runtime downloads and staging",
+                    value: RuntimeFormatting.bytes(runtimeManager.cacheUsage.downloadsAndStaging)
+                )
+                Button("Clear Runtime Downloads…") {
+                    confirmsClearingRuntimeCache = true
+                }
+                .disabled(runtimeManager.cacheUsage.downloadsAndStaging == 0)
+
+                LabeledContent(
+                    "Build cache",
+                    value: RuntimeFormatting.bytes(runtimeManager.cacheUsage.buildCache)
+                )
+                Button("Clear Build Cache…") {
+                    confirmsClearingBuildCache = true
+                }
+                .disabled(runtimeManager.cacheUsage.buildCache == 0)
+
+                if let message = runtimeManager.storageOperationMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Compiler") {
                 Picker("LaTeX engine", selection: $settings.latexEngine) {
                     ForEach(LatexEngine.allCases) { engine in
@@ -229,12 +304,89 @@ private struct LatexSettingsView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .task {
+            await runtimeManager.refreshStorageInfo()
+        }
+        .alert(
+            "Remove LighTeX Runtime?",
+            isPresented: Binding(
+                get: { runtimePendingRemoval != nil },
+                set: { if !$0 { runtimePendingRemoval = nil } }
+            )
+        ) {
+            Button("Remove", role: .destructive) {
+                if let runtimePendingRemoval {
+                    runtimeManager.removeInstalledRuntime(runtimePendingRemoval)
+                }
+                runtimePendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { runtimePendingRemoval = nil }
+        } message: {
+            Text("The selected inactive runtime will be deleted from Application Support. Projects are not affected.")
+        }
+        .alert("Clear Runtime Downloads?", isPresented: $confirmsClearingRuntimeCache) {
+            Button("Clear", role: .destructive) {
+                runtimeManager.clearRuntimeDownloadsAndStaging()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes downloaded archives and incomplete installations, freeing \(RuntimeFormatting.bytes(runtimeManager.cacheUsage.downloadsAndStaging)). Installed runtimes stay available.")
+        }
+        .alert("Clear Build Cache?", isPresented: $confirmsClearingBuildCache) {
+            Button("Clear", role: .destructive) {
+                runtimeManager.clearBuildCache()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This frees \(RuntimeFormatting.bytes(runtimeManager.cacheUsage.buildCache)). Project source files and generated PDFs in project folders are not deleted.")
+        }
     }
 
     private func engineLabel(_ engine: LatexEngine) -> String {
         runtimeManager.currentStatus.engines[engine] == nil
             ? "\(engine.label) — Not installed"
             : engine.label
+    }
+
+    private func installedRuntimeRow(_ runtime: InstalledRuntime) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text("\(runtime.record.runtimeVersion) · \(runtime.record.variant.label)")
+                            .fontWeight(.medium)
+                        if runtime.isActive {
+                            Text("ACTIVE")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    Text("\(runtime.record.architecture.rawValue) · \(RuntimeFormatting.bytes(runtime.installedSize))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !runtime.isActive {
+                    Button("Use") {
+                        runtimeManager.useInstalledRuntime(runtime)
+                    }
+                    .controlSize(.small)
+                    Button(role: .destructive) {
+                        runtimePendingRemoval = runtime
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel("Remove runtime \(runtime.record.runtimeVersion)")
+                }
+            }
+            Text(runtime.record.rootPath)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(runtime.record.rootPath)
+        }
     }
 }
 

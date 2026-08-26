@@ -30,6 +30,23 @@ struct ProjectTemplate: Identifiable, Equatable, Sendable {
     let blueprint: TemplateBlueprint?
 
     var isUserTemplate: Bool { origin == .user }
+    var previewURL: URL? {
+        guard let candidate = userDirectory?.appendingPathComponent("preview.png"),
+              FileManager.default.fileExists(atPath: candidate.path) else { return nil }
+        return candidate
+    }
+}
+
+struct TemplateReviewEntry: Identifiable, Equatable, Sendable {
+    let relativePath: String
+    let reason: String?
+
+    var id: String { relativePath }
+}
+
+struct TemplateCopyReview: Equatable, Sendable {
+    let included: [TemplateReviewEntry]
+    let excluded: [TemplateReviewEntry]
 }
 
 struct TemplateSourceDraft: Identifiable, Equatable {
@@ -70,6 +87,7 @@ private struct UserTemplateManifest: Codable {
     let createdAt: Date
     let entryFile: String
     let previewStyle: TemplatePreviewStyle
+    let previewFile: String?
 }
 
 final class ProjectTemplateStore {
@@ -108,7 +126,7 @@ final class ProjectTemplateStore {
             guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
                   let data = try? Data(contentsOf: directory.appendingPathComponent("manifest.json")),
                   let manifest = try? decoder.decode(UserTemplateManifest.self, from: data),
-                  manifest.schemaVersion == 1,
+                  (1...2).contains(manifest.schemaVersion),
                   FileManager.default.fileExists(
                     atPath: directory
                         .appendingPathComponent("files", isDirectory: true)
@@ -173,13 +191,14 @@ final class ProjectTemplateStore {
                 in: filesDirectory.appendingPathComponent(entryFile)
             )
             let manifest = UserTemplateManifest(
-                schemaVersion: 1,
+                schemaVersion: 2,
                 id: id,
                 name: cleanName,
                 summary: summary.trimmingCharacters(in: .whitespacesAndNewlines),
                 createdAt: Date(),
                 entryFile: entryFile,
-                previewStyle: previewStyle
+                previewStyle: previewStyle,
+                previewFile: "preview.png"
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -198,6 +217,25 @@ final class ProjectTemplateStore {
             throw ProjectTemplateError.invalidTemplate
         }
         return template
+    }
+
+    func reviewProjectContents(from sourceURL: URL) throws -> TemplateCopyReview {
+        let source = sourceURL.standardizedFileURL
+        guard (try? source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+            throw ProjectTemplateError.invalidTemplate
+        }
+        var included: [TemplateReviewEntry] = []
+        var excluded: [TemplateReviewEntry] = []
+        try reviewContents(
+            in: source,
+            relativeTo: source,
+            included: &included,
+            excluded: &excluded
+        )
+        return TemplateCopyReview(
+            included: included.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending },
+            excluded: excluded.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+        )
     }
 
     func instantiate(
@@ -330,9 +368,16 @@ final class ProjectTemplateStore {
         let name = url.lastPathComponent
         let lowerName = name.lowercased()
         if isDirectory {
-            return [".git", ".build", "build", "dist", ".lightex"].contains(lowerName)
+            return [".git", ".build", "build", "dist", ".lightex", "cache", "caches", ".cache"].contains(lowerName)
         }
         if lowerName == ".ds_store" || lowerName.hasSuffix(".synctex.gz") {
+            return true
+        }
+        if lowerName == ".env" || lowerName.hasPrefix(".env.")
+            || ["credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"].contains(lowerName) {
+            return true
+        }
+        if ["pem", "key", "p12", "pfx", "mobileprovision"].contains(url.pathExtension.lowercased()) {
             return true
         }
         let excludedExtensions: Set<String> = [
@@ -344,6 +389,62 @@ final class ProjectTemplateStore {
         }
         return url.pathExtension.lowercased() == "pdf"
             && texBasenames.contains(url.deletingPathExtension().lastPathComponent.lowercased())
+    }
+
+    private func reviewContents(
+        in directory: URL,
+        relativeTo root: URL,
+        included: inout [TemplateReviewEntry],
+        excluded: inout [TemplateReviewEntry]
+    ) throws {
+        let children = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: []
+        )
+        let texBasenames = Set(children.compactMap { url in
+            url.pathExtension.lowercased() == "tex"
+                ? url.deletingPathExtension().lastPathComponent.lowercased()
+                : nil
+        })
+        for item in children {
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            let relativePath = item.standardizedFileURL.pathComponents
+                .dropFirst(root.standardizedFileURL.pathComponents.count)
+                .joined(separator: "/")
+            if values.isSymbolicLink == true {
+                excluded.append(TemplateReviewEntry(relativePath: relativePath, reason: "Symbolic link"))
+                continue
+            }
+            if shouldExclude(item, isDirectory: values.isDirectory == true, texBasenames: texBasenames) {
+                excluded.append(TemplateReviewEntry(
+                    relativePath: relativePath + (values.isDirectory == true ? "/" : ""),
+                    reason: exclusionReason(for: item, isDirectory: values.isDirectory == true)
+                ))
+                continue
+            }
+            if values.isDirectory == true {
+                try reviewContents(
+                    in: item,
+                    relativeTo: root,
+                    included: &included,
+                    excluded: &excluded
+                )
+            } else {
+                included.append(TemplateReviewEntry(relativePath: relativePath, reason: nil))
+            }
+        }
+    }
+
+    private func exclusionReason(for url: URL, isDirectory: Bool) -> String {
+        let lower = url.lastPathComponent.lowercased()
+        if lower == ".env" || lower.hasPrefix(".env.")
+            || ["credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"].contains(lower)
+            || ["pem", "key", "p12", "pfx", "mobileprovision"].contains(url.pathExtension.lowercased()) {
+            return "Sensitive file"
+        }
+        if isDirectory { return "Build, cache, or metadata folder" }
+        return "Generated LaTeX file"
     }
 
     private func detectEntryFile(in root: URL) throws -> String? {

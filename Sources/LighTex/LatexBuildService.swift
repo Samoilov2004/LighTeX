@@ -25,6 +25,17 @@ enum LatexBuildService {
     }
 
     static func cacheDirectory(projectURL: URL, entryFileURL: URL) throws -> URL {
+        let buildsRoot = try buildsRootDirectory()
+        let key = stableKey(projectURL.path + "|" + entryFileURL.path)
+        let directory = buildsRoot.appendingPathComponent(key, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    static func buildsRootDirectory(create: Bool = true) throws -> URL {
         let buildsRoot: URL
         if let override = ProcessInfo.processInfo.environment["LIGHTEX_BUILD_CACHE_DIRECTORY"] {
             buildsRoot = URL(fileURLWithPath: override, isDirectory: true)
@@ -39,13 +50,10 @@ enum LatexBuildService {
                 .appendingPathComponent("LighTex", isDirectory: true)
                 .appendingPathComponent("Builds", isDirectory: true)
         }
-        let key = stableKey(projectURL.path + "|" + entryFileURL.path)
-        let directory = buildsRoot.appendingPathComponent(key, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        return directory
+        if create {
+            try FileManager.default.createDirectory(at: buildsRoot, withIntermediateDirectories: true)
+        }
+        return buildsRoot
     }
 
     static func stableKey(_ value: String) -> String {
