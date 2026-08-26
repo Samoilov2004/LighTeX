@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor
 final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
+    weak var model: AppModel?
     private var snapshotWindow: NSWindow?
     private var snapshotSettings: AppSettings?
     private var snapshotModel: AppModel?
@@ -38,6 +39,14 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model else { return .terminateNow }
+        Task { @MainActor in
+            sender.reply(toApplicationShouldTerminate: model.confirmApplicationTermination())
+        }
+        return .terminateLater
     }
 
     func applicationShouldHandleReopen(
@@ -178,6 +187,9 @@ struct LighTexApp: App {
                         : (model.showsTemplates ? "Templates" : "LighTex")
                 )
                 .frame(minWidth: 820, minHeight: 600)
+                .onAppear {
+                    appDelegate.model = model
+                }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))

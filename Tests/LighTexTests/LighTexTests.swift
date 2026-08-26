@@ -805,6 +805,65 @@ struct LighTexTests {
         #expect(AppModel.validProjectItemName("../bad") == nil)
         #expect(AppModel.validProjectItemName(" chapter.tex ") == "chapter.tex")
     }
+
+    @Test @MainActor
+    func dirtyDocumentCloseCanBeCancelledOrSaved() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let main = temporary.appendingPathComponent("main.tex")
+        try "original".write(to: main, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        do {
+            let defaults = makeIsolatedDefaults()
+            let settings = AppSettings(defaults: defaults)
+            let coordinator = DirtyDocumentCoordinator { request in
+                #expect(request.documentNames == ["main.tex"])
+                return .cancel
+            }
+            let model = AppModel(
+                settings: settings,
+                defaults: defaults,
+                dirtyDocumentCoordinator: coordinator
+            )
+            model.openProject(temporary)
+            model.updateSelectedText("cancelled edit")
+            model.closeDocument(main)
+            #expect(model.openDocuments.count == 1)
+            #expect(try String(contentsOf: main, encoding: .utf8) == "original")
+        }
+
+        do {
+            let defaults = makeIsolatedDefaults()
+            let settings = AppSettings(defaults: defaults)
+            let coordinator = DirtyDocumentCoordinator { _ in .save }
+            let model = AppModel(
+                settings: settings,
+                defaults: defaults,
+                dirtyDocumentCoordinator: coordinator
+            )
+            model.openProject(temporary)
+            model.updateSelectedText("saved edit")
+            model.closeDocument(main)
+            #expect(model.openDocuments.isEmpty)
+            #expect(try String(contentsOf: main, encoding: .utf8) == "saved edit")
+        }
+    }
+
+    @Test
+    func documentRevisionDetectsAChangedFile() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try "one".write(to: file, atomically: true, encoding: .utf8)
+        let first = try DocumentRevision.read(from: file).revision
+        try "two".write(to: file, atomically: true, encoding: .utf8)
+        let second = try DocumentRevision.read(from: file).revision
+
+        #expect(first.contentHash != second.contentHash)
+        #expect(first.fileSize == second.fileSize)
+    }
 }
 
 private func makeIsolatedDefaults() -> UserDefaults {

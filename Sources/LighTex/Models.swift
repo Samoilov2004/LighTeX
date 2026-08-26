@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CryptoKit
 
 enum LatexEngine: String, Codable, CaseIterable, Identifiable, Sendable {
     case pdfLaTeX
@@ -84,12 +85,89 @@ struct PDFJumpTarget: Equatable, Sendable {
     let yFromTop: Double?
 }
 
-struct EditorDocument: Identifiable, Equatable {
-    let url: URL
+struct DocumentRevision: Equatable, Sendable {
+    let modificationDate: Date?
+    let fileSize: Int64
+    let fileIdentifier: String?
+    let contentHash: String
+
+    static func read(from url: URL) throws -> (revision: DocumentRevision, text: String) {
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
+        return (try make(for: url, data: data), text)
+    }
+
+    static func make(for url: URL, text: String) throws -> DocumentRevision {
+        try make(for: url, data: Data(text.utf8))
+    }
+
+    static func fileIdentifier(for url: URL) -> String? {
+        let values = try? url.resourceValues(forKeys: [.fileResourceIdentifierKey])
+        return values?.fileResourceIdentifier.map { String(describing: $0) }
+    }
+
+    private static func make(for url: URL, data: Data) throws -> DocumentRevision {
+        let values = try url.resourceValues(forKeys: [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .fileResourceIdentifierKey
+        ])
+        return DocumentRevision(
+            modificationDate: values.contentModificationDate,
+            fileSize: Int64(values.fileSize ?? data.count),
+            fileIdentifier: values.fileResourceIdentifier.map { String(describing: $0) },
+            contentHash: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        )
+    }
+}
+
+enum ExternalChangeState: Equatable, Sendable {
+    case none
+    case modified
+    case deleted
+}
+
+enum DocumentSaveResult: Equatable, Sendable {
+    case notNeeded
+    case saved
+    case failed(String)
+
+    var succeeded: Bool {
+        switch self {
+        case .notNeeded, .saved: true
+        case .failed: false
+        }
+    }
+}
+
+enum CloseRequestKind: Equatable, Sendable {
+    case document(URL)
+    case project
+    case switchProject(URL)
+    case application
+}
+
+struct CloseRequest: Equatable, Sendable {
+    let kind: CloseRequestKind
+    let documentNames: [String]
+}
+
+enum CloseDecision: Equatable, Sendable {
+    case save
+    case discard
+    case cancel
+}
+
+struct EditorDocument: Identifiable, Equatable, Sendable {
+    var url: URL
     var text: String
     var isDirty: Bool
     var jumpLine: Int?
     var jumpToken: Int
+    var revision: DocumentRevision
+    var externalChangeState: ExternalChangeState = .none
 
     var id: URL { url }
     var displayName: String { url.lastPathComponent }

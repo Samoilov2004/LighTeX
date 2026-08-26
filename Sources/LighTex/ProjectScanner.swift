@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
 
-struct ProjectItem: Identifiable, Hashable {
+struct ProjectItem: Identifiable, Hashable, Sendable {
     let url: URL
     let isDirectory: Bool
     let children: [ProjectItem]?
@@ -49,6 +49,12 @@ enum ProjectScanner {
     static func texFiles(in projectURL: URL) -> [URL] {
         flatten(projectTree(in: projectURL))
             .filter { !$0.isDirectory && $0.url.pathExtension.lowercased() == "tex" }
+            .map(\.url)
+    }
+
+    static func files(in projectURL: URL) -> [URL] {
+        flatten(projectTree(in: projectURL))
+            .filter { !$0.isDirectory }
             .map(\.url)
     }
 

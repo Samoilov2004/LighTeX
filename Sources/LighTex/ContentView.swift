@@ -1274,25 +1274,32 @@ private struct EditorWorkspace: View {
                 .zIndex(1)
 
             if let document = model.selectedDocument {
-                SourceEditor(
-                    text: Binding(
-                        get: { model.selectedDocument?.text ?? "" },
-                        set: { model.updateSelectedText($0) }
-                    ),
-                    fontSize: settings.editorFontSize,
-                    tabWidth: settings.tabWidth,
-                    showsLineNumbers: settings.showLineNumbers,
-                    wordWrap: settings.wordWrap,
-                    autoCloseBrackets: settings.autoCloseBrackets,
-                    jumpLine: document.jumpLine,
-                    jumpToken: document.jumpToken,
-                    onCursorChange: model.updateCursor,
-                    onWordDoubleClick: { line, column in
-                        model.jumpPDF(toSource: document.url, line: line, column: column)
+                VStack(spacing: 0) {
+                    if document.externalChangeState != .none {
+                        ExternalChangeBanner(document: document)
+                        Divider()
                     }
-                )
-                .id(document.id)
-                .clipped()
+
+                    SourceEditor(
+                        text: Binding(
+                            get: { model.selectedDocument?.text ?? "" },
+                            set: { model.updateSelectedText($0) }
+                        ),
+                        fontSize: settings.editorFontSize,
+                        tabWidth: settings.tabWidth,
+                        showsLineNumbers: settings.showLineNumbers,
+                        wordWrap: settings.wordWrap,
+                        autoCloseBrackets: settings.autoCloseBrackets,
+                        jumpLine: document.jumpLine,
+                        jumpToken: document.jumpToken,
+                        onCursorChange: model.updateCursor,
+                        onWordDoubleClick: { line, column in
+                            model.jumpPDF(toSource: document.url, line: line, column: column)
+                        }
+                    )
+                    .id(document.id)
+                    .clipped()
+                }
             } else {
                 EmptyWorkspaceState(
                     icon: "doc.text",
@@ -1302,6 +1309,55 @@ private struct EditorWorkspace: View {
             }
         }
         .background(Color.white)
+    }
+}
+
+private struct ExternalChangeBanner: View {
+    @EnvironmentObject private var model: AppModel
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: document.externalChangeState == .modified
+                ? "arrow.triangle.2.circlepath"
+                : "doc.badge.exclamationmark")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(document.externalChangeState == .modified
+                    ? "This file changed outside LighTex"
+                    : "This file was removed from disk")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(document.externalChangeState == .modified
+                    ? "Choose which version to keep before saving or compiling."
+                    : "Save the open text somewhere else or close the tab.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if document.externalChangeState == .modified {
+                Button("Reload") { model.reloadExternalVersion(of: document.url) }
+                Button("Save Copy…") { model.saveConflictedCopy(of: document.url) }
+                Button("Keep Mine") { model.keepLocalVersion(of: document.url) }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Button("Close") { model.closeDeletedDocument(document.url) }
+                Button("Save As…") { model.saveDeletedDocumentAs(document.url) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(document.externalChangeState == .modified
+            ? "External file conflict"
+            : "File removed from disk")
     }
 }
 

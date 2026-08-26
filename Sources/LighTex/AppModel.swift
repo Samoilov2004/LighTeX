@@ -7,6 +7,22 @@ enum DocumentMovePlacement: Sendable, Equatable {
     case after
 }
 
+private struct WatchedDocumentSnapshot: Sendable {
+    let url: URL
+    let revision: DocumentRevision
+}
+
+private enum ExternalDocumentObservation: Sendable {
+    case loaded(originalURL: URL, currentURL: URL, revision: DocumentRevision, text: String)
+    case missing(URL)
+}
+
+private struct ExternalRefreshResult: Sendable {
+    let tree: [ProjectItem]
+    let texFiles: [URL]
+    let observations: [ExternalDocumentObservation]
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var projectURL: URL?
@@ -50,11 +66,16 @@ final class AppModel: ObservableObject {
     let settings: AppSettings
     let runtimeManager: RuntimeManager
     let templateStore: ProjectTemplateStore
+    let dirtyDocumentCoordinator: DirtyDocumentCoordinator
 
     private var pendingSaveTask: Task<Void, Never>?
     private var pendingBuildTask: Task<Void, Never>?
     private var buildQueuedWhileBuilding = false
     private var runtimeCancellable: AnyCancellable?
+    private var projectFileMonitor: ProjectFileMonitor?
+    private var externalRefreshTask: Task<Void, Never>?
+    private var pendingExternalText: [URL: String] = [:]
+    private var pendingExternalRevision: [URL: DocumentRevision] = [:]
     private var runtimeWasReady = false
     private let defaults: UserDefaults
     private let recentProjectsKey = "recentProjects.v1"
@@ -89,12 +110,14 @@ final class AppModel: ObservableObject {
         settings: AppSettings,
         runtimeManager: RuntimeManager,
         defaults: UserDefaults = .standard,
-        templateStore: ProjectTemplateStore? = nil
+        templateStore: ProjectTemplateStore? = nil,
+        dirtyDocumentCoordinator: DirtyDocumentCoordinator? = nil
     ) {
         self.settings = settings
         self.runtimeManager = runtimeManager
         self.defaults = defaults
         self.templateStore = templateStore ?? ProjectTemplateStore()
+        self.dirtyDocumentCoordinator = dirtyDocumentCoordinator ?? DirtyDocumentCoordinator()
         showsSidebar = defaults.object(forKey: "ui.showsSidebar") as? Bool ?? true
         showsPDF = defaults.object(forKey: "ui.showsPDF") as? Bool ?? true
         recentProjects = loadRecentProjects()
@@ -133,13 +156,15 @@ final class AppModel: ObservableObject {
     convenience init(
         settings: AppSettings,
         defaults: UserDefaults = .standard,
-        templateStore: ProjectTemplateStore? = nil
+        templateStore: ProjectTemplateStore? = nil,
+        dirtyDocumentCoordinator: DirtyDocumentCoordinator? = nil
     ) {
         self.init(
             settings: settings,
             runtimeManager: RuntimeManager(settings: settings, startsAutomatically: false),
             defaults: defaults,
-            templateStore: templateStore
+            templateStore: templateStore,
+            dirtyDocumentCoordinator: dirtyDocumentCoordinator
         )
     }
 
@@ -294,18 +319,24 @@ final class AppModel: ObservableObject {
         persistRecentProjects()
     }
 
-    func openProject(_ url: URL) {
-        saveAllDocuments()
+    @discardableResult
+    func openProject(_ url: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        if let currentProject = projectURL,
+           currentProject != standardizedURL,
+           !approveClose(kind: .switchProject(standardizedURL)) {
+            return false
+        }
+        stopMonitoringProject()
         pendingSaveTask?.cancel()
         pendingBuildTask?.cancel()
         buildQueuedWhileBuilding = false
 
-        let standardizedURL = url.standardizedFileURL
         showsTemplates = false
         projectURL = standardizedURL
         projectTree = ProjectScanner.projectTree(in: standardizedURL)
         let texFiles = ProjectScanner.texFiles(in: standardizedURL)
-        entryFileURL = ProjectScanner.preferredEntryPoint(from: texFiles)
+        entryFileURL = restoredEntryFile(in: standardizedURL, candidates: texFiles)
         openDocuments = []
         selectedDocumentID = nil
         navigatorSelection = nil
@@ -346,17 +377,24 @@ final class AppModel: ObservableObject {
         }
 
         refreshOutline()
+        startMonitoringProject(standardizedURL)
 
         if settings.automaticBuilds,
            entryFileURL != nil,
            runtimeManager.isSetupComplete {
             buildNow()
         }
+        return true
     }
 
     func closeProject() {
-        saveAllDocuments()
+        guard approveClose(kind: .project) else { return }
+        performCloseProject()
+    }
+
+    private func performCloseProject() {
         persistOpenDocuments()
+        stopMonitoringProject()
         pendingSaveTask?.cancel()
         pendingBuildTask?.cancel()
         buildQueuedWhileBuilding = false
@@ -418,13 +456,14 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            let text = try String(contentsOf: url, encoding: .utf8)
+            let loaded = try DocumentRevision.read(from: url)
             openDocuments.append(EditorDocument(
                 url: url,
-                text: text,
+                text: loaded.text,
                 isDirty: false,
                 jumpLine: line,
-                jumpToken: line == nil ? 0 : 1
+                jumpToken: line == nil ? 0 : 1,
+                revision: loaded.revision
             ))
             selectedDocumentID = url
             navigatorSelection = url
@@ -442,7 +481,11 @@ final class AppModel: ObservableObject {
     }
 
     func closeDocument(_ url: URL) {
-        saveDocument(url)
+        guard approveClose(kind: .document(url)) else { return }
+        performCloseDocument(url)
+    }
+
+    private func performCloseDocument(_ url: URL) {
         guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { return }
         let wasSelected = selectedDocumentID == url
         openDocuments.remove(at: index)
@@ -455,6 +498,8 @@ final class AppModel: ObservableObject {
             }
             navigatorSelection = selectedDocumentID
         }
+        pendingExternalText[url] = nil
+        pendingExternalRevision[url] = nil
         persistOpenDocuments()
     }
 
@@ -605,13 +650,16 @@ final class AppModel: ObservableObject {
 
     func saveSelectedDocument() {
         guard let selectedDocumentID else { return }
-        saveDocument(selectedDocumentID)
+        _ = saveDocument(selectedDocumentID)
     }
 
-    func saveAllDocuments() {
+    @discardableResult
+    func saveAllDocuments() -> DocumentSaveResult {
         for url in openDocuments.map(\.url) {
-            saveDocument(url)
+            let result = saveDocument(url)
+            if case .failed = result { return result }
         }
+        return .saved
     }
 
     func setEntryFile(_ url: URL) {
@@ -620,6 +668,7 @@ final class AppModel: ObservableObject {
         let existingPDF = url.deletingPathExtension().appendingPathExtension("pdf")
         previewPDFURL = FileManager.default.fileExists(atPath: existingPDF.path) ? existingPDF : nil
         if previewPDFURL != nil { pdfRevision += 1 }
+        persistEntryFile()
     }
 
     func buildNow() {
@@ -649,7 +698,11 @@ final class AppModel: ObservableObject {
             return
         }
 
-        saveAllDocuments()
+        let saveResult = saveAllDocuments()
+        guard saveResult.succeeded else {
+            buildState = .failure
+            return
+        }
         let configuration: BuildConfiguration
         do {
             configuration = try runtimeManager.buildConfiguration(
@@ -771,6 +824,108 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func confirmApplicationTermination() -> Bool {
+        approveClose(kind: .application)
+    }
+
+    func reloadExternalVersion(of url: URL) {
+        guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { return }
+        if let text = pendingExternalText[url], let revision = pendingExternalRevision[url] {
+            openDocuments[index].text = text
+            openDocuments[index].revision = revision
+            openDocuments[index].isDirty = false
+            openDocuments[index].externalChangeState = .none
+            pendingExternalText[url] = nil
+            pendingExternalRevision[url] = nil
+            refreshOutline()
+            return
+        }
+        do {
+            let loaded = try DocumentRevision.read(from: url)
+            openDocuments[index].text = loaded.text
+            openDocuments[index].revision = loaded.revision
+            openDocuments[index].isDirty = false
+            openDocuments[index].externalChangeState = .none
+            refreshOutline()
+        } catch {
+            alertMessage = "LighTex could not reload \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
+    func keepLocalVersion(of url: URL) {
+        guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Replace the version on disk?"
+        alert.informativeText = "The external changes to \(url.lastPathComponent) will be overwritten by the text currently open in LighTex."
+        alert.addButton(withTitle: "Keep Mine")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        openDocuments[index].externalChangeState = .none
+        let result = saveDocument(url)
+        if result.succeeded {
+            pendingExternalText[url] = nil
+            pendingExternalRevision[url] = nil
+        } else {
+            openDocuments[index].externalChangeState = .modified
+        }
+    }
+
+    func saveConflictedCopy(of url: URL) {
+        guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save a Copy of \(url.lastPathComponent)"
+        panel.directoryURL = url.deletingLastPathComponent()
+        let base = url.deletingPathExtension().lastPathComponent
+        let suffix = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
+        panel.nameFieldStringValue = "\(base) local copy\(suffix)"
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        do {
+            try openDocuments[index].text.write(to: destination, atomically: true, encoding: .utf8)
+            reloadExternalVersion(of: url)
+            refreshProject()
+            if isInsideProject(destination) {
+                openDocument(destination)
+            }
+        } catch {
+            alertMessage = "LighTex could not save the copy: \(error.localizedDescription)"
+        }
+    }
+
+    func saveDeletedDocumentAs(_ url: URL) {
+        guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save Missing Document As"
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.nameFieldStringValue = url.lastPathComponent
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            try openDocuments[index].text.write(to: destination, atomically: true, encoding: .utf8)
+            let loaded = try DocumentRevision.read(from: destination)
+            replaceDocumentURL(at: index, with: destination)
+            openDocuments[index].text = loaded.text
+            openDocuments[index].revision = loaded.revision
+            openDocuments[index].isDirty = false
+            openDocuments[index].externalChangeState = .none
+            refreshProject()
+        } catch {
+            alertMessage = "LighTex could not save the document: \(error.localizedDescription)"
+        }
+    }
+
+    func closeDeletedDocument(_ url: URL) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Close without saving?"
+        alert.informativeText = "The file no longer exists on disk. Any text still open in LighTex will be lost."
+        alert.addButton(withTitle: "Close Without Saving")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        performCloseDocument(url)
+    }
+
     func revealProjectInFinder() {
         guard let projectURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([projectURL])
@@ -786,17 +941,191 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([previewPDFURL])
     }
 
-    private func saveDocument(_ url: URL) {
+    @discardableResult
+    private func saveDocument(_ url: URL) -> DocumentSaveResult {
         guard let index = openDocuments.firstIndex(where: { $0.url == url }),
               openDocuments[index].isDirty else {
-            return
+            return .notNeeded
+        }
+        guard openDocuments[index].externalChangeState == .none else {
+            let message = "Resolve the external change for \(url.lastPathComponent) before saving."
+            alertMessage = message
+            return .failed(message)
         }
         do {
             try openDocuments[index].text.write(to: url, atomically: true, encoding: .utf8)
+            openDocuments[index].revision = try DocumentRevision.make(
+                for: url,
+                text: openDocuments[index].text
+            )
             openDocuments[index].isDirty = false
+            return .saved
         } catch {
-            alertMessage = "LighTex could not save \(url.lastPathComponent): \(error.localizedDescription)"
+            let message = "LighTex could not save \(url.lastPathComponent): \(error.localizedDescription)"
+            alertMessage = message
+            return .failed(message)
         }
+    }
+
+    private func approveClose(kind: CloseRequestKind) -> Bool {
+        let documents: [EditorDocument]
+        switch kind {
+        case let .document(url):
+            documents = openDocuments.filter { $0.url == url && $0.isDirty }
+        case .project, .switchProject, .application:
+            documents = openDocuments.filter(\.isDirty)
+        }
+        guard !documents.isEmpty else { return true }
+
+        let request = CloseRequest(
+            kind: kind,
+            documentNames: documents.map(\.displayName)
+        )
+        switch dirtyDocumentCoordinator.decision(for: request) {
+        case .discard:
+            return true
+        case .cancel:
+            return false
+        case .save:
+            for document in documents {
+                if !saveDocument(document.url).succeeded { return false }
+            }
+            return true
+        }
+    }
+
+    private func startMonitoringProject(_ url: URL) {
+        let monitor = ProjectFileMonitor(rootURL: url) { [weak self] in
+            self?.projectFilesDidChange()
+        }
+        projectFileMonitor = monitor
+        monitor.start()
+    }
+
+    private func stopMonitoringProject() {
+        projectFileMonitor?.stop()
+        projectFileMonitor = nil
+        externalRefreshTask?.cancel()
+        externalRefreshTask = nil
+        pendingExternalText.removeAll()
+        pendingExternalRevision.removeAll()
+    }
+
+    private func projectFilesDidChange() {
+        guard let projectURL else { return }
+        externalRefreshTask?.cancel()
+        let snapshots = openDocuments.map {
+            WatchedDocumentSnapshot(url: $0.url, revision: $0.revision)
+        }
+        externalRefreshTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                Self.inspectProjectChanges(projectURL: projectURL, documents: snapshots)
+            }.value
+            guard !Task.isCancelled, let self, self.projectURL == projectURL else { return }
+            self.applyExternalRefresh(result)
+        }
+    }
+
+    nonisolated private static func inspectProjectChanges(
+        projectURL: URL,
+        documents: [WatchedDocumentSnapshot]
+    ) -> ExternalRefreshResult {
+        let tree = ProjectScanner.projectTree(in: projectURL)
+        let files = ProjectScanner.files(in: projectURL)
+        let texFiles = files.filter { $0.pathExtension.lowercased() == "tex" }
+        var urlsByIdentifier: [String: URL] = [:]
+        for url in files {
+            if let identifier = DocumentRevision.fileIdentifier(for: url) {
+                urlsByIdentifier[identifier] = url
+            }
+        }
+
+        let observations = documents.compactMap { snapshot -> ExternalDocumentObservation? in
+            let currentURL: URL
+            if FileManager.default.fileExists(atPath: snapshot.url.path) {
+                currentURL = snapshot.url
+            } else if let identifier = snapshot.revision.fileIdentifier,
+                      let movedURL = urlsByIdentifier[identifier] {
+                currentURL = movedURL
+            } else {
+                return .missing(snapshot.url)
+            }
+            guard let loaded = try? DocumentRevision.read(from: currentURL) else { return nil }
+            return .loaded(
+                originalURL: snapshot.url,
+                currentURL: currentURL,
+                revision: loaded.revision,
+                text: loaded.text
+            )
+        }
+        return ExternalRefreshResult(tree: tree, texFiles: texFiles, observations: observations)
+    }
+
+    private func applyExternalRefresh(_ result: ExternalRefreshResult) {
+        projectTree = result.tree
+        for observation in result.observations {
+            switch observation {
+            case let .missing(url):
+                guard let index = openDocuments.firstIndex(where: { $0.url == url }) else { continue }
+                openDocuments[index].externalChangeState = .deleted
+                pendingExternalText[url] = nil
+                pendingExternalRevision[url] = nil
+            case let .loaded(originalURL, currentURL, revision, text):
+                guard let index = openDocuments.firstIndex(where: { $0.url == originalURL }) else { continue }
+                if currentURL != originalURL {
+                    replaceDocumentURL(at: index, with: currentURL)
+                }
+                let effectiveURL = openDocuments[index].url
+                guard revision != openDocuments[index].revision else { continue }
+                if text == openDocuments[index].text {
+                    openDocuments[index].revision = revision
+                    openDocuments[index].externalChangeState = .none
+                    pendingExternalText[effectiveURL] = nil
+                    pendingExternalRevision[effectiveURL] = nil
+                } else if openDocuments[index].isDirty {
+                    openDocuments[index].externalChangeState = .modified
+                    pendingExternalText[effectiveURL] = text
+                    pendingExternalRevision[effectiveURL] = revision
+                } else {
+                    openDocuments[index].text = text
+                    openDocuments[index].revision = revision
+                    openDocuments[index].externalChangeState = .none
+                }
+            }
+        }
+
+        if let entryFileURL,
+           !result.texFiles.contains(entryFileURL) {
+            self.entryFileURL = ProjectScanner.preferredEntryPoint(from: result.texFiles)
+            persistEntryFile()
+        }
+        refreshOutline()
+        persistOpenDocuments()
+    }
+
+    private func replaceDocumentURL(at index: Int, with newURL: URL) {
+        let oldURL = openDocuments[index].url
+        guard oldURL != newURL else { return }
+        openDocuments[index].url = newURL.standardizedFileURL
+        if selectedDocumentID == oldURL { selectedDocumentID = newURL }
+        if navigatorSelection == oldURL { navigatorSelection = newURL }
+        if entryFileURL == oldURL {
+            entryFileURL = newURL
+            persistEntryFile()
+        }
+        if let text = pendingExternalText.removeValue(forKey: oldURL) {
+            pendingExternalText[newURL] = text
+        }
+        if let revision = pendingExternalRevision.removeValue(forKey: oldURL) {
+            pendingExternalRevision[newURL] = revision
+        }
+    }
+
+    private func isInsideProject(_ url: URL) -> Bool {
+        guard let projectURL else { return false }
+        let root = projectURL.standardizedFileURL.path
+        let candidate = url.standardizedFileURL.path
+        return candidate == root || candidate.hasPrefix(root + "/")
     }
 
     private var selectedProjectDirectory: URL? {
@@ -814,7 +1143,7 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled, let self else { return }
             if self.settings.autosave {
-                self.saveDocument(url)
+                _ = self.saveDocument(url)
             }
         }
     }
@@ -888,6 +1217,30 @@ final class AppModel: ObservableObject {
 
     private func selectedDocumentKey(for projectURL: URL) -> String {
         "selectedDocument.\(LatexBuildService.stableKey(projectURL.path))"
+    }
+
+    private func entryFileKey(for projectURL: URL) -> String {
+        "entryFile.\(LatexBuildService.stableKey(projectURL.path))"
+    }
+
+    private func restoredEntryFile(in projectURL: URL, candidates: [URL]) -> URL? {
+        if let relativePath = defaults.string(forKey: entryFileKey(for: projectURL)) {
+            let candidate = projectURL.appendingPathComponent(relativePath).standardizedFileURL
+            if candidates.contains(candidate) { return candidate }
+        }
+        return ProjectScanner.preferredEntryPoint(from: candidates)
+    }
+
+    private func persistEntryFile() {
+        guard let projectURL else { return }
+        guard let entryFileURL else {
+            defaults.removeObject(forKey: entryFileKey(for: projectURL))
+            return
+        }
+        defaults.set(
+            ProjectScanner.relativePath(for: entryFileURL, inside: projectURL),
+            forKey: entryFileKey(for: projectURL)
+        )
     }
 
     private func persistOpenDocuments() {
