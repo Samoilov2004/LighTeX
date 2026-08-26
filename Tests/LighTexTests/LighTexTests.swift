@@ -119,7 +119,7 @@ struct LighTexTests {
         )
     }
 
-    @Test
+    @Test(.enabled(if: systemLatexBuildIsAvailable()))
     func compilesMinimalLatexProject() async throws {
         #expect(try await latexBuildProducesPDF())
     }
@@ -1268,7 +1268,15 @@ struct LighTexTests {
 
     @Test @MainActor
     func insertShelfInsertionIsOneUndoableEditorAction() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 180),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
         let textView = CodeTextView()
+        window.contentView = textView
+        defer { window.close() }
         textView.allowsUndo = true
         textView.string = "vector"
         textView.setSelectedRange(NSRange(location: 0, length: 6))

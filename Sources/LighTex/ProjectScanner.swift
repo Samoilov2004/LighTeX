@@ -79,8 +79,8 @@ enum ProjectScanner {
     }
 
     static func relativePath(for fileURL: URL, inside projectURL: URL) -> String {
-        let root = projectURL.standardizedFileURL.path
-        let file = fileURL.standardizedFileURL.path
+        let root = projectURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let file = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
         guard file.hasPrefix(root + "/") else { return fileURL.lastPathComponent }
         return String(file.dropFirst(root.count + 1))
     }
@@ -95,11 +95,21 @@ enum ProjectScanner {
             return []
         }
 
-        return urls.compactMap { url -> ProjectItem? in
-            guard let values = try? url.resourceValues(forKeys: keys),
+        return urls.compactMap { discoveredURL -> ProjectItem? in
+            guard let values = try? discoveredURL.resourceValues(forKeys: keys),
                   values.isHidden != true else {
                 return nil
             }
+
+            // FileManager canonicalizes aliases such as /var to /private/var while
+            // enumerating. Keep every child in the same URL namespace as the root
+            // that the user opened so URL identity remains stable throughout the UI.
+            let url = directory
+                .appendingPathComponent(
+                    discoveredURL.lastPathComponent,
+                    isDirectory: values.isDirectory == true
+                )
+                .standardizedFileURL
 
             if values.isDirectory == true {
                 guard !ignoredDirectories.contains(url.lastPathComponent) else { return nil }

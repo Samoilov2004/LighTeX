@@ -34,6 +34,17 @@ func cacheKeyIsStableAndDistinct() -> Bool {
         && LatexBuildService.stableKey("project") != LatexBuildService.stableKey("other")
 }
 
+func systemLatexBuildIsAvailable() -> Bool {
+    let status = ToolchainService.detectSystemSynchronously(
+        environment: ProcessInfo.processInfo.environment
+    )
+    return (try? ToolchainService.buildConfiguration(
+        status: status,
+        engine: .pdfLaTeX,
+        tool: .latexmk
+    )) != nil
+}
+
 func latexBuildProducesPDF() async throws -> Bool {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
