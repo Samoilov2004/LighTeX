@@ -17,6 +17,9 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_SHOW_TEMPLATES"] == "1" {
             snapshotModel?.showTemplateLibrary()
         }
+        if ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_SHOW_INSERT_SHELF"] == "1" {
+            snapshotModel?.showsInsertShelf = true
+        }
         if ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_SHOW_SETTINGS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.snapshotModel?.showsSettingsPanel = true
@@ -279,6 +282,12 @@ struct LighTexApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(!model.hasProject)
+
+                Button(model.showsInsertShelf ? "Close Insert Shelf" : "Open Insert Shelf") {
+                    model.showsInsertShelf.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(model.selectedDocument?.url.pathExtension.lowercased() != "tex")
             }
 
             CommandMenu("Build") {

@@ -32,16 +32,19 @@ struct SourceEditor: NSViewRepresentable {
     let wordWrap: Bool
     let autoCloseBrackets: Bool
     var completionIndex: ProjectCompletionIndex = .empty
+    var insertionRequest: LatexInsertionRequest?
     let jumpLine: Int?
     let jumpToken: Int
     let onCursorChange: (Int, Int) -> Void
     let onWordDoubleClick: (Int, Int) -> Void
+    var onInsertionHandled: (UUID) -> Void = { _ in }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: SourceEditor
         var isApplyingUpdate = false
         var lastJumpToken = -1
+        var lastInsertionID: UUID?
         var lastFontSize = -1.0
         var lastTabWidth = -1
         var lastShowsLineNumbers: Bool?
@@ -154,6 +157,17 @@ struct SourceEditor: NSViewRepresentable {
             textView.scrollRangeToVisible(NSRange(location: safeLocation, length: 0))
             textView.window?.makeFirstResponder(textView)
             updateSelectionState(textView)
+        }
+
+        func applyInsertionIfNeeded(to textView: CodeTextView) {
+            guard let request = parent.insertionRequest,
+                  request.id != lastInsertionID else { return }
+            lastInsertionID = request.id
+            textView.performLatexInsertion(request)
+            let requestID = request.id
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.onInsertionHandled(requestID)
+            }
         }
 
         private func matchingBracketRanges(in text: String, cursor: Int) -> [NSRange] {
@@ -294,6 +308,7 @@ struct SourceEditor: NSViewRepresentable {
         }
 
         context.coordinator.jumpIfNeeded(in: textView)
+        context.coordinator.applyInsertionIfNeeded(to: textView)
         context.coordinator.rulerView?.needsDisplay = true
     }
 
@@ -357,6 +372,22 @@ final class CodeTextView: NSTextView {
     var opensAtDocumentStart = false
     var onWordDoubleClick: ((Int, Int) -> Void)?
     var completionIndex: ProjectCompletionIndex = .empty
+
+    func performLatexInsertion(_ request: LatexInsertionRequest) {
+        guard let result = LatexInsertionService.result(
+            in: string,
+            selection: selectedRange(),
+            request: request
+        ) else { return }
+
+        undoManager?.beginUndoGrouping()
+        insertText(result.replacement, replacementRange: result.replacementRange)
+        setSelectedRange(NSRange(location: result.cursorLocation, length: 0))
+        scrollRangeToVisible(selectedRange())
+        undoManager?.setActionName(request.actionName)
+        undoManager?.endUndoGrouping()
+        window?.makeFirstResponder(self)
+    }
 
     func refreshTypingAttributes() {
         typingAttributes = [

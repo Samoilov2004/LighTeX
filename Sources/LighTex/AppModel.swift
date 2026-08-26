@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(showsPDF, forKey: "ui.showsPDF") }
     }
     @Published var showsProblemsPanel = false
+    @Published var showsInsertShelf = false
     @Published var problemsPanelTab: ProblemsPanelTab = .problems
     @Published var showsCreateProjectSheet = false
     @Published var showsTemplates = false
@@ -415,6 +416,7 @@ final class AppModel: ObservableObject {
         buildState = .idle
         isAutoCompilePending = false
         showsProblemsPanel = false
+        showsInsertShelf = false
 
         if let entryFileURL {
             let existingPDF = entryFileURL.deletingPathExtension().appendingPathExtension("pdf")
@@ -496,6 +498,7 @@ final class AppModel: ObservableObject {
         diagnosticGroups = []
         missingPackageFile = nil
         showsProblemsPanel = false
+        showsInsertShelf = false
         defaults.removeObject(forKey: lastProjectPathKey)
     }
 
@@ -1224,6 +1227,43 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([previewPDFURL])
     }
 
+    var projectImageFiles: [URL] {
+        guard let projectURL else { return [] }
+        let extensions: Set<String> = ["png", "jpg", "jpeg", "pdf", "svg", "eps"]
+        return ProjectScanner.files(in: projectURL)
+            .filter { extensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    func prepareFigureImage(_ sourceURL: URL) -> String? {
+        guard let projectURL else { return nil }
+        let source = sourceURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            alertMessage = "The selected image no longer exists."
+            return nil
+        }
+        if isInsideProject(source) {
+            return ProjectScanner.relativePath(for: source, inside: projectURL)
+        }
+
+        do {
+            let figures = projectURL.appendingPathComponent("figures", isDirectory: true)
+            let destinationDirectory = (try? figures.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                ? figures
+                : projectURL
+            let destination = uniqueImportedURL(
+                named: source.lastPathComponent,
+                in: destinationDirectory
+            )
+            try FileManager.default.copyItem(at: source, to: destination)
+            refreshProject()
+            return ProjectScanner.relativePath(for: destination, inside: projectURL)
+        } catch {
+            alertMessage = "LighTex could not import the image: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     @discardableResult
     private func saveDocument(_ url: URL) -> DocumentSaveResult {
         guard let index = openDocuments.firstIndex(where: { $0.url == url }),
@@ -1450,6 +1490,23 @@ final class AppModel: ObservableObject {
                 ? stem + suffix
                 : stem + suffix + "." + pathExtension
             let candidate = directory.appendingPathComponent(name, isDirectory: isDirectory)
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            counter += 1
+        }
+    }
+
+    private func uniqueImportedURL(named name: String, in directory: URL) -> URL {
+        let original = directory.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: original.path) else { return original }
+        let source = URL(fileURLWithPath: name)
+        let pathExtension = source.pathExtension
+        let stem = pathExtension.isEmpty ? name : source.deletingPathExtension().lastPathComponent
+        var counter = 2
+        while true {
+            let candidateName = pathExtension.isEmpty
+                ? "\(stem) \(counter)"
+                : "\(stem) \(counter).\(pathExtension)"
+            let candidate = directory.appendingPathComponent(candidateName)
             if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
             counter += 1
         }

@@ -1160,6 +1160,154 @@ struct LighTexTests {
         )
         #expect(argument.hasPrefix("3:12.500:48.250:"))
     }
+
+    @Test
+    func insertShelfWrapsMathWithDollarSigns() throws {
+        let request = LatexInsertionRequest(
+            template: "\\alpha" + LatexInsertionRequest.cursorMarker,
+            mode: .math,
+            actionName: "Insert Alpha"
+        )
+        let result = try #require(LatexInsertionService.result(
+            in: "Value: ",
+            selection: NSRange(location: 7, length: 0),
+            request: request
+        ))
+        #expect(result.replacement == "$\\alpha$")
+        #expect(result.cursorLocation == 14)
+    }
+
+    @Test
+    func insertShelfDoesNotNestDollarSignsInsideMath() throws {
+        let source = "$x + $"
+        let request = LatexInsertionRequest(
+            template: "\\beta" + LatexInsertionRequest.cursorMarker,
+            mode: .math,
+            actionName: "Insert Beta"
+        )
+        let result = try #require(LatexInsertionService.result(
+            in: source,
+            selection: NSRange(location: 5, length: 0),
+            request: request
+        ))
+        #expect(result.replacement == "\\beta")
+        #expect(result.cursorLocation == 10)
+    }
+
+    @Test
+    func insertShelfRecognizesMathEnvironmentsAndIgnoresCommentedMath() throws {
+        let request = LatexInsertionRequest(
+            template: "\\gamma" + LatexInsertionRequest.cursorMarker,
+            mode: .math,
+            actionName: "Insert Gamma"
+        )
+        let equation = "\\begin{equation}\nx = "
+        let inEnvironment = try #require(LatexInsertionService.result(
+            in: equation,
+            selection: NSRange(location: (equation as NSString).length, length: 0),
+            request: request
+        ))
+        #expect(inEnvironment.replacement == "\\gamma")
+
+        let afterComment = "% $comment only\nValue: "
+        let outsideMath = try #require(LatexInsertionService.result(
+            in: afterComment,
+            selection: NSRange(location: (afterComment as NSString).length, length: 0),
+            request: request
+        ))
+        #expect(outsideMath.replacement == "$\\gamma$")
+    }
+
+    @Test
+    func insertShelfResizesCompactlyAndClosesLikeABlind() {
+        #expect(InsertShelfSizing.defaultHeight == 168)
+        #expect(
+            InsertShelfSizing.height(
+                from: InsertShelfSizing.defaultHeight,
+                translation: -110
+            ) == 58
+        )
+        #expect(
+            InsertShelfSizing.shouldClose(
+                currentHeight: 58,
+                predictedHeight: 32
+            )
+        )
+        #expect(
+            !InsertShelfSizing.shouldClose(
+                currentHeight: InsertShelfSizing.minimumHeight,
+                predictedHeight: InsertShelfSizing.minimumHeight
+            )
+        )
+        #expect(
+            InsertShelfSizing.height(
+                from: InsertShelfSizing.maximumHeight,
+                translation: 100
+            ) == InsertShelfSizing.maximumHeight
+        )
+    }
+
+    @Test
+    func insertShelfUsesDollarSyntaxForInlineAndDisplayMath() throws {
+        let inline = try #require(LatexInsertionService.result(
+            in: "x + y",
+            selection: NSRange(location: 0, length: 5),
+            request: LatexInsertCatalog.inlineMath
+        ))
+        #expect(inline.replacement == "$x + y$")
+        #expect(!inline.replacement.contains("\\("))
+
+        let display = try #require(LatexInsertionService.result(
+            in: "",
+            selection: NSRange(location: 0, length: 0),
+            request: LatexInsertCatalog.displayMath
+        ))
+        #expect(display.replacement == "$$\n  \n$$")
+        #expect(!display.replacement.contains("\\["))
+    }
+
+    @Test @MainActor
+    func insertShelfInsertionIsOneUndoableEditorAction() throws {
+        let textView = CodeTextView()
+        textView.allowsUndo = true
+        textView.string = "vector"
+        textView.setSelectedRange(NSRange(location: 0, length: 6))
+        textView.performLatexInsertion(LatexInsertCatalog.inlineMath)
+        #expect(textView.string == "$vector$")
+        #expect(textView.undoManager?.canUndo == true)
+        textView.undoManager?.undo()
+        #expect(textView.string == "vector")
+    }
+
+    @Test @MainActor
+    func importsFigureWithoutOverwritingAnExistingProjectFile() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let source = temporary.appendingPathComponent("source", isDirectory: true)
+        let projects = temporary.appendingPathComponent("projects", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let image = source.appendingPathComponent("diagram.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: image)
+
+        let defaults = makeIsolatedDefaults()
+        let settings = AppSettings(defaults: defaults)
+        settings.automaticBuilds = false
+        let model = AppModel(settings: settings, defaults: defaults)
+        #expect(model.createProject(name: "Figures", location: projects))
+        let first = model.prepareFigureImage(image)
+        let second = model.prepareFigureImage(image)
+        #expect(first == "diagram.png")
+        #expect(second == "diagram 2.png")
+        #expect(FileManager.default.fileExists(
+            atPath: projects.appendingPathComponent("Figures/diagram.png").path
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: projects.appendingPathComponent("Figures/diagram 2.png").path
+        ))
+        model.closeProject()
+    }
 }
 
 private func makeIsolatedDefaults() -> UserDefaults {

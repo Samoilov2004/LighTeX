@@ -1689,6 +1689,7 @@ private struct OutlineNavigatorRow: View {
 private struct EditorWorkspace: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: AppSettings
+    @State private var insertionRequest: LatexInsertionRequest?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1697,6 +1698,12 @@ private struct EditorWorkspace: View {
 
             if let document = model.selectedDocument {
                 VStack(spacing: 0) {
+                    if document.url.pathExtension.lowercased() == "tex" {
+                        InsertShelfContainer { request in
+                            insertionRequest = request
+                        }
+                    }
+
                     if document.externalChangeState != .none {
                         ExternalChangeBanner(document: document)
                         Divider()
@@ -1713,11 +1720,17 @@ private struct EditorWorkspace: View {
                         wordWrap: settings.wordWrap,
                         autoCloseBrackets: settings.autoCloseBrackets,
                         completionIndex: model.projectCompletionIndex,
+                        insertionRequest: insertionRequest,
                         jumpLine: document.jumpLine,
                         jumpToken: document.jumpToken,
                         onCursorChange: model.updateCursor,
                         onWordDoubleClick: { line, column in
                             model.jumpPDF(toSource: document.url, line: line, column: column)
+                        },
+                        onInsertionHandled: { requestID in
+                            if insertionRequest?.id == requestID {
+                                insertionRequest = nil
+                            }
                         }
                     )
                     .id(document.id)
