@@ -1,0 +1,37 @@
+name: LighTeX CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Require an executable test runtime
+        run: |
+          xcrun --find xctest
+          test -x "$(xcrun --find xctest)"
+
+      - name: Run Swift tests
+        env:
+          LIGHTEX_REQUIRE_TEST_EXECUTION: "1"
+        run: ./Scripts/test.sh
+
+      - name: Build production app
+        run: ./Scripts/build-app.sh
+
+      - name: Verify bundle and signature
+        run: |
+          test -x dist/LighTex.app/Contents/MacOS/LighTex
+          plutil -lint dist/LighTex.app/Contents/Info.plist
+          codesign --verify --deep --strict --verbose=2 dist/LighTex.app

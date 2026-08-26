@@ -89,6 +89,7 @@ final class AppModel: ObservableObject {
     private var pendingSearchTask: Task<Void, Never>?
     private var pendingCompletionTask: Task<Void, Never>?
     private var outlineCache: [URL: [DocumentOutlineItem]] = [:]
+    private var projectTexFiles: [URL] = []
     private var completionSymbols: [URL: CompletionFileSymbols] = [:]
     private var buildQueuedWhileBuilding = false
     private var runtimeCancellable: AnyCancellable?
@@ -395,6 +396,7 @@ final class AppModel: ObservableObject {
         projectURL = standardizedURL
         projectTree = ProjectScanner.projectTree(in: standardizedURL)
         let texFiles = ProjectScanner.texFiles(in: standardizedURL)
+        projectTexFiles = texFiles
         entryFileURL = restoredEntryFile(in: standardizedURL, candidates: texFiles)
         openDocuments = []
         outlineCache = [:]
@@ -474,6 +476,7 @@ final class AppModel: ObservableObject {
         projectTree = []
         outlineItems = []
         outlineCache = [:]
+        projectTexFiles = []
         selectedOutlineItemID = nil
         projectSearchResults = []
         projectSearchError = nil
@@ -500,6 +503,7 @@ final class AppModel: ObservableObject {
         guard let projectURL else { return }
         projectTree = ProjectScanner.projectTree(in: projectURL)
         let texFiles = ProjectScanner.texFiles(in: projectURL)
+        projectTexFiles = texFiles
         if entryFileURL == nil || !FileManager.default.fileExists(atPath: entryFileURL?.path ?? "") {
             entryFileURL = ProjectScanner.preferredEntryPoint(from: texFiles)
         }
@@ -1348,6 +1352,7 @@ final class AppModel: ObservableObject {
 
     private func applyExternalRefresh(_ result: ExternalRefreshResult) {
         projectTree = result.tree
+        projectTexFiles = result.texFiles
         for observation in result.observations {
             switch observation {
             case let .missing(url):
@@ -1600,7 +1605,7 @@ final class AppModel: ObservableObject {
             selectedOutlineItemID = nil
             return
         }
-        let texFiles = ProjectScanner.texFiles(in: projectURL)
+        let texFiles = projectTexFiles
         let openSources = Dictionary(uniqueKeysWithValues: openDocuments.map { ($0.url, $0.text) })
         pendingOutlineTask = Task { [weak self] in
             let parsed = await Task.detached(priority: .utility) {
@@ -1627,15 +1632,16 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let items = await Task.detached(priority: .utility) {
-                LatexOutlineParser.parse(text, fileURL: fileURL)
+                let signpost = LighTexPerformance.begin(.outlineParse)
+                defer { LighTexPerformance.end(.outlineParse, signpost) }
+                return LatexOutlineParser.parse(text, fileURL: fileURL)
             }.value
             guard !Task.isCancelled, let self,
                   self.openDocuments.contains(where: { $0.url == fileURL && $0.text == text }) else {
                 return
             }
             self.outlineCache[fileURL] = items
-            let texFiles = ProjectScanner.texFiles(in: self.projectURL ?? fileURL.deletingLastPathComponent())
-            self.publishOutline(for: texFiles)
+            self.publishOutline(for: self.projectTexFiles)
         }
     }
 

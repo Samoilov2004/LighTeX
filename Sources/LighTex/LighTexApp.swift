@@ -60,6 +60,10 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareSnapshotWindow() {
+        let width = ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_WIDTH"]
+            .flatMap(Double.init) ?? 1_320
+        let height = ProcessInfo.processInfo.environment["LIGHTEX_SNAPSHOT_HEIGHT"]
+            .flatMap(Double.init) ?? 820
         let defaults = Self.configuredDefaults()
         let settings = AppSettings(defaults: defaults)
         let runtimeManager = RuntimeManager(settings: settings)
@@ -73,10 +77,10 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
             .environmentObject(settings)
             .environmentObject(runtimeManager)
             .preferredColorScheme(.light)
-            .frame(width: 1_320, height: 820)
+            .frame(width: width, height: height)
         let controller = NSHostingController(rootView: root)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1_320, height: 820),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -86,7 +90,7 @@ final class LighTexAppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.contentViewController = controller
-        controller.view.frame = NSRect(x: 0, y: 0, width: 1_320, height: 820)
+        controller.view.frame = NSRect(x: 0, y: 0, width: width, height: height)
         window.center()
         window.makeKeyAndOrderFront(nil)
         snapshotSettings = settings

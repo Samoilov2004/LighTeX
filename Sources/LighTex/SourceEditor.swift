@@ -703,6 +703,8 @@ enum SyntaxHighlighter {
     }
 
     static func applyColors(to storage: NSTextStorage, editedRange: NSRange? = nil) {
+        let signpost = LighTexPerformance.begin(.syntaxHighlight)
+        defer { LighTexPerformance.end(.syntaxHighlight, signpost) }
         let fullRange = NSRange(location: 0, length: storage.length)
         guard fullRange.length > 0 else { return }
         let targetRange = highlightRange(in: storage.string as NSString, editedRange: editedRange)

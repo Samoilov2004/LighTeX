@@ -1339,11 +1339,8 @@ private struct ProjectSearchNavigator: View {
             searchResults
         }
         .onAppear { searchFieldFocused = true }
-        .alert("Replace all matches?", isPresented: $confirmsReplaceAll) {
-            Button("Replace All") { model.replaceAllProjectSearchResults() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will update \(Set(model.projectSearchResults.map(\.fileURL)).count) files. You can undo this replacement until the next Replace All operation.")
+        .sheet(isPresented: $confirmsReplaceAll) {
+            ProjectReplacePreviewSheet()
         }
     }
 
@@ -1413,6 +1410,67 @@ private struct ProjectSearchNavigator: View {
             }
             .accessibilityLabel("Project search results")
         }
+    }
+}
+
+private struct ProjectReplacePreviewSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var groupedResults: [(URL, [ProjectSearchResult])] {
+        Dictionary(grouping: model.projectSearchResults, by: \.fileURL)
+            .sorted { $0.key.path.localizedStandardCompare($1.key.path) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Review Replace All")
+                .font(.system(size: 17, weight: .semibold))
+            Text("\(model.projectSearchResults.count) matches in \(groupedResults.count) files will be replaced. The last Replace All can be undone.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(groupedResults, id: \.0) { fileURL, results in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(fileURL.lastPathComponent)
+                                .font(.system(size: 12, weight: .semibold))
+                            ForEach(results) { result in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text("\(result.line)")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.tertiary)
+                                        .frame(width: 34, alignment: .trailing)
+                                    Text(result.preview)
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .font(.system(size: 11, design: .monospaced))
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+            }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Replace All") {
+                    model.replaceAllProjectSearchResults()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 560, height: 460)
+        .preferredColorScheme(.light)
     }
 }
 
