@@ -1572,6 +1572,7 @@ private struct EditorWorkspace: View {
                         showsLineNumbers: settings.showLineNumbers,
                         wordWrap: settings.wordWrap,
                         autoCloseBrackets: settings.autoCloseBrackets,
+                        completionIndex: model.projectCompletionIndex,
                         jumpLine: document.jumpLine,
                         jumpToken: document.jumpToken,
                         onCursorChange: model.updateCursor,
@@ -2197,26 +2198,34 @@ func projectFileURLs(from pasteboard: NSPasteboard) -> [URL] {
 private struct PDFWorkspace: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var controller = PDFPreviewController()
+    @State private var showsSearch = false
+    @State private var pdfSearchText = ""
+    @State private var pageText = "1"
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             pdfToolbar
+            if showsSearch {
+                pdfSearchToolbar
+            }
             Divider()
 
             if let url = model.previewPDFURL {
                 PDFPreview(
                     url: url,
                     revision: model.pdfRevision,
-                    controller: controller
+                    controller: controller,
+                    onDoubleClick: model.jumpSource
                 )
             } else if model.buildState == .failure {
                 EmptyWorkspaceState(
                     icon: "xmark.circle",
                     title: "Build failed",
                     detail: model.problems.first?.message ?? "Open Problems to inspect the compiler output.",
-                    actionTitle: "Show Problems",
+                    actionTitle: model.showsProblemsPanel ? "View Compiler Log" : "Show Problems",
                     action: {
-                        model.problemsPanelTab = .problems
+                        model.problemsPanelTab = model.showsProblemsPanel ? .log : .problems
                         model.showsProblemsPanel = true
                     }
                 )
@@ -2242,6 +2251,16 @@ private struct PDFWorkspace: View {
         .onChange(of: model.pdfJumpToken) { _, _ in
             controller.goTo(model.pdfJumpTarget)
         }
+        .onChange(of: controller.currentPage) { _, page in
+            if page > 0 { pageText = "\(page)" }
+        }
+        .onExitCommand {
+            if showsSearch {
+                showsSearch = false
+                pdfSearchText = ""
+                controller.search("")
+            }
+        }
     }
 
     private var pdfToolbar: some View {
@@ -2250,6 +2269,21 @@ private struct PDFWorkspace: View {
                 .font(.system(size: 12, weight: .semibold))
             Spacer()
 
+            Button {
+                showsSearch.toggle()
+                if showsSearch {
+                    searchFieldFocused = true
+                } else {
+                    pdfSearchText = ""
+                    controller.search("")
+                }
+            } label: {
+                Image(systemName: showsSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
+            }
+            .help(showsSearch ? "Close PDF search" : "Search PDF")
+            .accessibilityLabel(showsSearch ? "Close PDF search" : "Search PDF")
+            .disabled(model.previewPDFURL == nil)
+
             Button(action: controller.previousPage) {
                 Image(systemName: "chevron.up")
             }
@@ -2257,11 +2291,26 @@ private struct PDFWorkspace: View {
             .accessibilityLabel("Previous page")
             .disabled(model.previewPDFURL == nil)
 
-            Text(model.previewPDFURL == nil ? "—" : controller.pageLabel)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(minWidth: 54)
+            HStack(spacing: 3) {
+                TextField("Page", text: $pageText)
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(width: 24)
+                    .onSubmit {
+                        if let page = Int(pageText) {
+                            controller.goToPage(page)
+                        }
+                        pageText = "\(max(1, controller.currentPage))"
+                    }
+                    .accessibilityLabel("PDF page number")
+                Text("of \(controller.pageCount)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11))
+            .frame(minWidth: 58)
+            .opacity(model.previewPDFURL == nil ? 0.45 : 1)
 
             Button(action: controller.nextPage) {
                 Image(systemName: "chevron.down")
@@ -2309,6 +2358,54 @@ private struct PDFWorkspace: View {
         .font(.system(size: 12))
         .padding(.horizontal, 10)
         .frame(height: 34)
+        .background(LighTexTheme.secondaryBackground)
+    }
+
+    private var pdfSearchToolbar: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Find in PDF", text: $pdfSearchText)
+                .textFieldStyle(.plain)
+                .focused($searchFieldFocused)
+                .onChange(of: pdfSearchText) { _, query in
+                    controller.search(query)
+                }
+                .onSubmit { controller.nextSearchMatch() }
+                .accessibilityLabel("Find in PDF")
+            Text(controller.searchMatchCount == 0
+                ? "No matches"
+                : "\(controller.currentSearchMatch) of \(controller.searchMatchCount)")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 66, alignment: .trailing)
+            Button(action: controller.previousSearchMatch) {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(controller.searchMatchCount == 0)
+            .help("Previous PDF match")
+            .accessibilityLabel("Previous PDF match")
+            Button(action: controller.nextSearchMatch) {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(controller.searchMatchCount == 0)
+            .help("Next PDF match")
+            .accessibilityLabel("Next PDF match")
+            Button {
+                showsSearch = false
+                pdfSearchText = ""
+                controller.search("")
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .help("Close PDF search")
+            .accessibilityLabel("Close PDF search")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
         .background(LighTexTheme.secondaryBackground)
     }
 }
@@ -2369,7 +2466,7 @@ private struct ProblemsPanel: View {
     }
 
     private var problemCountSuffix: String {
-        model.problems.isEmpty ? "" : " · \(model.problems.count)"
+        model.diagnosticGroups.isEmpty ? "" : " · \(model.diagnosticGroups.count)"
     }
 
     @ViewBuilder
@@ -2401,7 +2498,7 @@ private struct ProblemsPanel: View {
                 Divider()
             }
 
-            if model.problems.isEmpty {
+            if model.diagnosticGroups.isEmpty {
                 EmptyWorkspaceState(
                     icon: "checkmark.circle",
                     title: "No problems",
@@ -2410,38 +2507,15 @@ private struct ProblemsPanel: View {
                         : "Compiler errors and warnings will appear here."
                 )
             } else {
-                List(model.problems) { problem in
-                    Button {
-                        model.openProblem(problem)
-                    } label: {
-                        HStack(alignment: .top, spacing: 9) {
-                            Image(systemName: problem.severity.symbol)
-                                .foregroundStyle(problem.severity.color)
-                                .font(.system(size: 13))
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Text(problem.fileDisplayName)
-                                        .font(.system(size: 12, weight: .medium))
-                                    if let line = problem.line {
-                                        Text(":\(line)")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Text(problem.message)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            Spacer()
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.diagnosticGroups) { group in
+                            DiagnosticGroupRow(group: group)
+                            Divider()
+                                .padding(.leading, 32)
                         }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .disabled(problem.fileURL == nil)
                 }
-                .listStyle(.plain)
             }
         }
     }
@@ -2456,6 +2530,92 @@ private struct ProblemsPanel: View {
                 .padding(10)
         }
         .background(Color.white)
+    }
+}
+
+private struct DiagnosticGroupRow: View {
+    @EnvironmentObject private var model: AppModel
+    let group: BuildDiagnosticGroup
+    @State private var showsRelated = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if group.primary.fileURL != nil {
+                Button {
+                    model.openProblem(group.primary)
+                } label: {
+                    problemRow(group.primary, isPrimary: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                problemRow(group.primary, isPrimary: true)
+                    .accessibilityElement(children: .combine)
+            }
+
+            if !group.related.isEmpty {
+                Button {
+                    showsRelated.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .rotationEffect(.degrees(showsRelated ? 90 : 0))
+                        Text("\(group.related.count) related compiler message\(group.related.count == 1 ? "" : "s")")
+                        Spacer()
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 32)
+                    .padding(.trailing, 10)
+                    .frame(height: 25)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showsRelated ? "Hide related compiler messages" : "Show related compiler messages")
+
+                if showsRelated {
+                    ForEach(group.related) { problem in
+                        if problem.fileURL != nil {
+                            Button { model.openProblem(problem) } label: {
+                                problemRow(problem, isPrimary: false)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            problemRow(problem, isPrimary: false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func problemRow(_ problem: BuildProblem, isPrimary: Bool) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: problem.severity.symbol)
+                .foregroundStyle(problem.severity.color)
+                .font(.system(size: 13))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(problem.fileDisplayName)
+                        .font(.system(size: 12, weight: isPrimary ? .semibold : .medium))
+                    if let line = problem.line {
+                        Text(":\(line)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(problem.message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isPrimary ? .primary : .secondary)
+                    .lineLimit(isPrimary ? 3 : 2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, isPrimary ? 8 : 6)
+        .contentShape(Rectangle())
+        .background(isPrimary ? Color.clear : LighTexTheme.secondaryBackground.opacity(0.55))
+        .accessibilityLabel("\(problem.severity.rawValue), \(problem.fileDisplayName), \(problem.message)")
     }
 }
 

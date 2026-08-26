@@ -85,6 +85,12 @@ struct PDFJumpTarget: Equatable, Sendable {
     let yFromTop: Double?
 }
 
+struct PDFSourceTarget: Equatable, Sendable {
+    let fileURL: URL
+    let line: Int
+    let column: Int
+}
+
 struct DocumentRevision: Equatable, Sendable {
     let modificationDate: Date?
     let fileSize: Int64
@@ -193,20 +199,36 @@ struct BuildProblem: Identifiable, Hashable, Sendable {
         }
     }
 
-    let id = UUID()
     let severity: Severity
     let fileURL: URL?
     let fileDisplayName: String
     let line: Int?
     let message: String
 
+    var id: String {
+        "\(severity.rawValue)|\(fileURL?.path ?? fileDisplayName)|\(line ?? 0)|\(message)"
+    }
+
     static func == (lhs: BuildProblem, rhs: BuildProblem) -> Bool {
-        lhs.id == rhs.id
+        lhs.severity == rhs.severity
+            && lhs.fileURL == rhs.fileURL
+            && lhs.line == rhs.line
+            && lhs.message == rhs.message
     }
 
     func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
+        hasher.combine(severity)
+        hasher.combine(fileURL)
+        hasher.combine(line)
+        hasher.combine(message)
     }
+}
+
+struct BuildDiagnosticGroup: Identifiable, Equatable, Sendable {
+    let primary: BuildProblem
+    let related: [BuildProblem]
+
+    var id: String { primary.id }
 }
 
 enum ProblemsPanelTab: String, CaseIterable, Identifiable {

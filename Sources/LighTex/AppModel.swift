@@ -29,6 +29,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var projectTree: [ProjectItem] = []
     @Published private(set) var outlineItems: [DocumentOutlineItem] = []
     @Published private(set) var selectedOutlineItemID: String?
+    @Published private(set) var projectCompletionIndex: ProjectCompletionIndex = .empty
     @Published private(set) var entryFileURL: URL?
     @Published private(set) var openDocuments: [EditorDocument] = []
     @Published var selectedDocumentID: URL?
@@ -52,6 +53,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var buildState: BuildState = .idle
     @Published private(set) var buildLog = ""
     @Published private(set) var problems: [BuildProblem] = []
+    @Published private(set) var diagnosticGroups: [BuildDiagnosticGroup] = []
     @Published private(set) var lastBuildDate: Date?
     @Published private(set) var isAutoCompilePending = false
     @Published private(set) var missingPackageFile: String?
@@ -84,7 +86,9 @@ final class AppModel: ObservableObject {
     private var pendingBuildTask: Task<Void, Never>?
     private var pendingOutlineTask: Task<Void, Never>?
     private var pendingSearchTask: Task<Void, Never>?
+    private var pendingCompletionTask: Task<Void, Never>?
     private var outlineCache: [URL: [DocumentOutlineItem]] = [:]
+    private var completionSymbols: [URL: CompletionFileSymbols] = [:]
     private var buildQueuedWhileBuilding = false
     private var runtimeCancellable: AnyCancellable?
     private var projectFileMonitor: ProjectFileMonitor?
@@ -349,6 +353,7 @@ final class AppModel: ObservableObject {
         pendingBuildTask?.cancel()
         pendingOutlineTask?.cancel()
         pendingSearchTask?.cancel()
+        pendingCompletionTask?.cancel()
         buildQueuedWhileBuilding = false
 
         showsTemplates = false
@@ -362,10 +367,13 @@ final class AppModel: ObservableObject {
         projectSearchResults = []
         projectSearchError = nil
         lastReplaceTransaction = nil
+        completionSymbols = [:]
+        projectCompletionIndex = .empty
         selectedDocumentID = nil
         navigatorSelection = nil
         buildLog = ""
         problems = []
+        diagnosticGroups = []
         missingPackageFile = nil
         buildState = .idle
         isAutoCompilePending = false
@@ -401,6 +409,7 @@ final class AppModel: ObservableObject {
         }
 
         refreshOutline()
+        refreshCompletionIndex()
         startMonitoringProject(standardizedURL)
 
         if settings.automaticBuilds,
@@ -423,6 +432,7 @@ final class AppModel: ObservableObject {
         pendingBuildTask?.cancel()
         pendingOutlineTask?.cancel()
         pendingSearchTask?.cancel()
+        pendingCompletionTask?.cancel()
         buildQueuedWhileBuilding = false
         projectURL = nil
         showsTemplates = false
@@ -433,6 +443,8 @@ final class AppModel: ObservableObject {
         projectSearchResults = []
         projectSearchError = nil
         lastReplaceTransaction = nil
+        completionSymbols = [:]
+        projectCompletionIndex = .empty
         entryFileURL = nil
         openDocuments = []
         selectedDocumentID = nil
@@ -443,6 +455,7 @@ final class AppModel: ObservableObject {
         isAutoCompilePending = false
         buildLog = ""
         problems = []
+        diagnosticGroups = []
         missingPackageFile = nil
         showsProblemsPanel = false
         defaults.removeObject(forKey: lastProjectPathKey)
@@ -456,6 +469,7 @@ final class AppModel: ObservableObject {
             entryFileURL = ProjectScanner.preferredEntryPoint(from: texFiles)
         }
         refreshOutline()
+        refreshCompletionIndex()
     }
 
     func activateNavigatorItem(_ url: URL) {
@@ -777,6 +791,7 @@ final class AppModel: ObservableObject {
             for: selectedDocumentID,
             text: text
         )
+        scheduleCompletionRefresh(for: selectedDocumentID, text: text)
         if sidebarMode == .search, !projectSearchQuery.isEmpty {
             scheduleProjectSearch()
         }
@@ -828,6 +843,10 @@ final class AppModel: ObservableObject {
                 line: nil,
                 message: "No LaTeX entry file was found. Add main.tex or a document containing \\documentclass."
             )]
+            diagnosticGroups = BuildProblemParser.groups(
+                from: problems,
+                missingPackageFile: nil
+            )
             buildState = .failure
             problemsPanelTab = .problems
             showsProblemsPanel = true
@@ -854,6 +873,10 @@ final class AppModel: ObservableObject {
                 line: nil,
                 message: error.localizedDescription
             )]
+            diagnosticGroups = BuildProblemParser.groups(
+                from: problems,
+                missingPackageFile: nil
+            )
             buildState = .failure
             problemsPanelTab = .problems
             showsProblemsPanel = true
@@ -862,6 +885,7 @@ final class AppModel: ObservableObject {
         buildState = .building
         buildLog = "Building \(entryRelativePath) with \(settings.latexEngine.label)…"
         problems = []
+        diagnosticGroups = []
         missingPackageFile = nil
 
         let result = await LatexBuildService.build(
@@ -878,6 +902,10 @@ final class AppModel: ObservableObject {
         buildLog = result.log
         problems = result.problems
         missingPackageFile = result.missingPackageFile
+        diagnosticGroups = BuildProblemParser.groups(
+            from: result.problems,
+            missingPackageFile: result.missingPackageFile
+        )
         if result.succeeded {
             previewPDFURL = result.previewPDF
             pdfRevision += 1
@@ -944,6 +972,29 @@ final class AppModel: ObservableObject {
             self.pdfJumpTarget = target
             self.pdfJumpToken += 1
             self.showsPDF = true
+        }
+    }
+
+    func jumpSource(fromPDFPage page: Int, x: Double, yFromTop: Double) {
+        guard let previewPDFURL, let projectURL else { return }
+        let syncTeXURL = runtimeManager.syncTeXURL
+        Task { [weak self] in
+            let target = await SyncTeXService.sourceTarget(
+                forPDF: previewPDFURL,
+                page: page,
+                x: x,
+                yFromTop: yFromTop,
+                projectURL: projectURL,
+                executableURL: syncTeXURL
+            )
+            guard let self, self.projectURL == projectURL, let target else { return }
+            guard self.isInsideProject(target.fileURL),
+                  FileManager.default.fileExists(atPath: target.fileURL.path) else {
+                self.alertMessage = "SyncTeX pointed to a source file outside this project."
+                return
+            }
+            self.openDocument(target.fileURL, line: target.line)
+            self.updateCursor(line: target.line, column: target.column)
         }
     }
 
@@ -1299,6 +1350,7 @@ final class AppModel: ObservableObject {
             persistEntryFile()
         }
         refreshOutline()
+        refreshCompletionIndex()
         persistOpenDocuments()
     }
 
@@ -1573,6 +1625,58 @@ final class AppModel: ObservableObject {
             .filter { $0.fileURL == selectedDocumentID && $0.line <= cursorLine }
             .max(by: { $0.line < $1.line })?
             .id
+    }
+
+    private func refreshCompletionIndex() {
+        pendingCompletionTask?.cancel()
+        guard let projectURL else {
+            completionSymbols = [:]
+            projectCompletionIndex = .empty
+            return
+        }
+        let files = ProjectScanner.editableTextFiles(in: projectURL)
+        let openSources = Dictionary(uniqueKeysWithValues: openDocuments.map { ($0.url, $0.text) })
+        pendingCompletionTask = Task { [weak self] in
+            let parsed = await Task.detached(priority: .utility) {
+                Dictionary(uniqueKeysWithValues: files.map { fileURL in
+                    let source = openSources[fileURL]
+                        ?? (try? String(contentsOf: fileURL, encoding: .utf8))
+                        ?? ""
+                    return (
+                        fileURL,
+                        LatexCompletionService.parseSymbols(in: source, fileURL: fileURL)
+                    )
+                })
+            }.value
+            guard !Task.isCancelled, let self, self.projectURL == projectURL else { return }
+            self.completionSymbols = parsed
+            self.projectCompletionIndex = LatexCompletionService.makeIndex(
+                projectURL: projectURL,
+                symbols: parsed
+            )
+        }
+    }
+
+    private func scheduleCompletionRefresh(for fileURL: URL, text: String) {
+        guard ["tex", "bib", "sty", "cls"].contains(fileURL.pathExtension.lowercased()),
+              let projectURL else { return }
+        pendingCompletionTask?.cancel()
+        pendingCompletionTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let symbols = await Task.detached(priority: .utility) {
+                LatexCompletionService.parseSymbols(in: text, fileURL: fileURL)
+            }.value
+            guard !Task.isCancelled, let self,
+                  self.openDocuments.contains(where: { $0.url == fileURL && $0.text == text }) else {
+                return
+            }
+            self.completionSymbols[fileURL] = symbols
+            self.projectCompletionIndex = LatexCompletionService.makeIndex(
+                projectURL: projectURL,
+                symbols: self.completionSymbols
+            )
+        }
     }
 
     private func updateRecentProjects(with url: URL) {

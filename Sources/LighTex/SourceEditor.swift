@@ -31,6 +31,7 @@ struct SourceEditor: NSViewRepresentable {
     let showsLineNumbers: Bool
     let wordWrap: Bool
     let autoCloseBrackets: Bool
+    var completionIndex: ProjectCompletionIndex = .empty
     let jumpLine: Int?
     let jumpToken: Int
     let onCursorChange: (Int, Int) -> Void
@@ -255,6 +256,7 @@ struct SourceEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? CodeTextView else { return }
         context.coordinator.parent = self
+        textView.completionIndex = completionIndex
 
         let typographyChanged = context.coordinator.lastFontSize != fontSize
             || context.coordinator.lastTabWidth != tabWidth
@@ -296,6 +298,7 @@ struct SourceEditor: NSViewRepresentable {
     }
 
     private func configure(_ textView: CodeTextView) {
+        textView.completionIndex = completionIndex
         textView.isRichText = false
         textView.importsGraphics = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -353,6 +356,7 @@ final class CodeTextView: NSTextView {
     var editorParagraphStyle: NSParagraphStyle = .default
     var opensAtDocumentStart = false
     var onWordDoubleClick: ((Int, Int) -> Void)?
+    var completionIndex: ProjectCompletionIndex = .empty
 
     func refreshTypingAttributes() {
         typingAttributes = [
@@ -394,7 +398,7 @@ final class CodeTextView: NSTextView {
     }
 
     override var rangeForUserCompletion: NSRange {
-        latexEnvironmentCompletionContext(
+        LatexCompletionService.context(
             in: string,
             selection: selectedRange()
         )?.partialRange ?? NSRange(location: NSNotFound, length: 0)
@@ -404,14 +408,17 @@ final class CodeTextView: NSTextView {
         forPartialWordRange charRange: NSRange,
         indexOfSelectedItem index: UnsafeMutablePointer<Int>
     ) -> [String]? {
-        guard let context = latexEnvironmentCompletionContext(
+        guard let context = LatexCompletionService.context(
             in: string,
             selection: selectedRange()
         ) else {
             return nil
         }
         index.pointee = 0
-        return latexEnvironmentCompletions(for: context.query)
+        return LatexCompletionService.completions(
+            for: context,
+            index: completionIndex
+        ).map(\.label)
     }
 
     override func insertCompletion(
@@ -420,7 +427,12 @@ final class CodeTextView: NSTextView {
         movement: Int,
         isFinal flag: Bool
     ) {
-        guard latexEnvironmentNames.contains(word) else {
+        let completionContext = LatexCompletionService.context(
+            in: string,
+            selection: selectedRange()
+        )
+        guard completionContext?.kind == .environment,
+              latexEnvironmentNames.contains(word) else {
             super.insertCompletion(
                 word,
                 forPartialWordRange: charRange,
@@ -471,6 +483,11 @@ final class CodeTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control),
+           event.charactersIgnoringModifiers == " " {
+            complete(nil)
+            return
+        }
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
         guard modifiers.isEmpty,
               let characters = event.characters,
@@ -527,12 +544,15 @@ final class CodeTextView: NSTextView {
         guard eligibleCharacter else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self,
-                  let context = latexEnvironmentCompletionContext(
+                  let context = LatexCompletionService.context(
                     in: self.string,
                     selection: self.selectedRange()
                   ),
                   !context.query.isEmpty,
-                  !latexEnvironmentCompletions(for: context.query).isEmpty else {
+                  !LatexCompletionService.completions(
+                    for: context,
+                    index: self.completionIndex
+                  ).isEmpty else {
                 return
             }
             self.complete(nil)

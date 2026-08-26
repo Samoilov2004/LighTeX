@@ -6,10 +6,14 @@ final class PDFPreviewController: ObservableObject {
     @Published private(set) var zoomPercent = 100
     @Published private(set) var currentPage = 0
     @Published private(set) var pageCount = 0
+    @Published private(set) var searchMatchCount = 0
+    @Published private(set) var currentSearchMatch = 0
 
     weak var pdfView: PDFView?
     private var refreshScheduled = false
     private var pendingTarget: PDFJumpTarget?
+    private var searchSelections: [PDFSelection] = []
+    private var searchQuery = ""
 
     var pageLabel: String {
         pageCount == 0 ? "—" : "\(currentPage) of \(pageCount)"
@@ -73,6 +77,56 @@ final class PDFPreviewController: ObservableObject {
         refreshState()
     }
 
+    func goToPage(_ pageNumber: Int) {
+        guard let pdfView,
+              let page = pdfView.document?.page(at: max(0, min(pageNumber - 1, pageCount - 1))) else {
+            return
+        }
+        pdfView.go(to: page)
+        refreshState()
+    }
+
+    func search(_ query: String) {
+        searchQuery = query
+        guard let pdfView, let document = pdfView.document, !query.isEmpty else {
+            searchSelections = []
+            searchMatchCount = 0
+            currentSearchMatch = 0
+            pdfView?.highlightedSelections = nil
+            return
+        }
+        searchSelections = document.findString(query, withOptions: [.caseInsensitive])
+        searchMatchCount = searchSelections.count
+        currentSearchMatch = searchSelections.isEmpty ? 0 : 1
+        pdfView.highlightedSelections = searchSelections
+        if let first = searchSelections.first {
+            pdfView.setCurrentSelection(first, animate: true)
+            pdfView.go(to: first)
+        }
+    }
+
+    func nextSearchMatch() {
+        guard !searchSelections.isEmpty, let pdfView else { return }
+        currentSearchMatch = currentSearchMatch % searchSelections.count + 1
+        let selection = searchSelections[currentSearchMatch - 1]
+        pdfView.setCurrentSelection(selection, animate: true)
+        pdfView.go(to: selection)
+    }
+
+    func previousSearchMatch() {
+        guard !searchSelections.isEmpty, let pdfView else { return }
+        currentSearchMatch = currentSearchMatch <= 1
+            ? searchSelections.count
+            : currentSearchMatch - 1
+        let selection = searchSelections[currentSearchMatch - 1]
+        pdfView.setCurrentSelection(selection, animate: true)
+        pdfView.go(to: selection)
+    }
+
+    func reapplySearch() {
+        search(searchQuery)
+    }
+
     func goTo(_ target: PDFJumpTarget?) {
         guard let target, target.page > 0 else { return }
         pendingTarget = target
@@ -97,10 +151,28 @@ final class PDFPreviewController: ObservableObject {
                 )
             )
             pdfView.go(to: destination)
+            positionTargetNearTop(
+                point: destination.point,
+                page: page,
+                in: pdfView
+            )
         } else {
             pdfView.go(to: page)
         }
         refreshState()
+    }
+
+    private func positionTargetNearTop(point: NSPoint, page: PDFPage, in pdfView: PDFView) {
+        DispatchQueue.main.async { [weak pdfView] in
+            guard let pdfView,
+                  let documentView = pdfView.documentView,
+                  let clipView = documentView.enclosingScrollView?.contentView else { return }
+            let pointInPDFView = pdfView.convert(point, from: page)
+            let pointInDocument = documentView.convert(pointInPDFView, from: pdfView)
+            let targetY = max(0, pointInDocument.y - clipView.bounds.height / 3)
+            clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: targetY))
+            documentView.enclosingScrollView?.reflectScrolledClipView(clipView)
+        }
     }
 
     func refreshState() {
@@ -131,6 +203,7 @@ struct PDFPreview: NSViewRepresentable {
     let url: URL
     let revision: Int
     @ObservedObject var controller: PDFPreviewController
+    let onDoubleClick: (Int, Double, Double) -> Void
 
     @MainActor
     final class Coordinator: NSObject {
@@ -149,7 +222,8 @@ struct PDFPreview: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
+        let view = SyncedPDFView()
+        view.onSourceRequest = onDoubleClick
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
@@ -176,6 +250,7 @@ struct PDFPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PDFView, context: Context) {
+        (view as? SyncedPDFView)?.onSourceRequest = onDoubleClick
         context.coordinator.controller = controller
         controller.attach(view)
         guard context.coordinator.loadedRevision != revision else { return }
@@ -199,6 +274,31 @@ struct PDFPreview: NSViewRepresentable {
             }
         }
         controller.applyPendingNavigation()
+        controller.reapplySearch()
         controller.scheduleRefresh()
+    }
+}
+
+private final class SyncedPDFView: PDFView {
+    var onSourceRequest: ((Int, Double, Double) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 2 else {
+            super.mouseDown(with: event)
+            return
+        }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        guard let page = page(for: viewPoint, nearest: true),
+              let pageIndex = document?.index(for: page) else {
+            super.mouseDown(with: event)
+            return
+        }
+        let point = convert(viewPoint, to: page)
+        let bounds = page.bounds(for: displayBox)
+        onSourceRequest?(
+            pageIndex + 1,
+            Double(max(0, point.x - bounds.minX)),
+            Double(max(0, bounds.maxY - point.y))
+        )
     }
 }

@@ -241,6 +241,38 @@ enum LatexBuildService {
 }
 
 enum BuildProblemParser {
+    static func groups(
+        from problems: [BuildProblem],
+        missingPackageFile: String?
+    ) -> [BuildDiagnosticGroup] {
+        let errors = problems.filter { $0.severity == .error }
+        let warnings = problems.filter { $0.severity == .warning }
+        var groups: [BuildDiagnosticGroup] = []
+
+        if let primary = errors.first {
+            groups.append(BuildDiagnosticGroup(
+                primary: primary,
+                related: Array(errors.dropFirst())
+            ))
+        } else if let missingPackageFile {
+            groups.append(BuildDiagnosticGroup(
+                primary: BuildProblem(
+                    severity: .error,
+                    fileURL: nil,
+                    fileDisplayName: "Build",
+                    line: nil,
+                    message: "The package providing \(missingPackageFile) is not installed."
+                ),
+                related: []
+            ))
+        }
+
+        groups.append(contentsOf: warnings.map {
+            BuildDiagnosticGroup(primary: $0, related: [])
+        })
+        return groups
+    }
+
     static func parse(_ log: String, projectURL: URL) -> [BuildProblem] {
         var problems: [BuildProblem] = []
         var seen: Set<String> = []

@@ -933,6 +933,111 @@ struct LighTexTests {
         #expect(second.entryFileURL == alternate)
         second.closeProject()
     }
+
+    @Test
+    func groupsCompilerCascadeUnderOnePrimaryProblem() {
+        let problems = [
+            BuildProblem(
+                severity: .error,
+                fileURL: URL(fileURLWithPath: "/tmp/main.tex"),
+                fileDisplayName: "main.tex",
+                line: 3,
+                message: "File `missing.sty' not found"
+            ),
+            BuildProblem(
+                severity: .error,
+                fileURL: nil,
+                fileDisplayName: "Build",
+                line: nil,
+                message: "Emergency stop"
+            ),
+            BuildProblem(
+                severity: .error,
+                fileURL: nil,
+                fileDisplayName: "Build",
+                line: nil,
+                message: "Fatal error occurred"
+            )
+        ]
+        let groups = BuildProblemParser.groups(
+            from: problems,
+            missingPackageFile: "missing.sty"
+        )
+        #expect(groups.count == 1)
+        #expect(groups[0].primary.line == 3)
+        #expect(groups[0].related.count == 2)
+    }
+
+    @Test
+    func indexesProjectCompletionSymbolsAndSelectsContext() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main.tex")
+        let bib = root.appendingPathComponent("references.bib")
+        let figure = root.appendingPathComponent("figures/plot.png")
+        try FileManager.default.createDirectory(
+            at: figure.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try #"\usepackage{tcolorbox}\label{sec:vectors}\newcommand{\vect}{}"#
+            .write(to: main, atomically: true, encoding: .utf8)
+        try "@book{knuth1984, title={TeX}}".write(to: bib, atomically: true, encoding: .utf8)
+        FileManager.default.createFile(atPath: figure.path, contents: Data())
+
+        let symbols = [
+            main: LatexCompletionService.parseSymbols(
+                in: try String(contentsOf: main, encoding: .utf8),
+                fileURL: main
+            ),
+            bib: LatexCompletionService.parseSymbols(
+                in: try String(contentsOf: bib, encoding: .utf8),
+                fileURL: bib
+            )
+        ]
+        let index = LatexCompletionService.makeIndex(projectURL: root, symbols: symbols)
+        #expect(index.labels.contains("sec:vectors"))
+        #expect(index.citations.contains("knuth1984"))
+        #expect(index.packages.contains("tcolorbox"))
+        #expect(index.commands.contains("vect"))
+        #expect(index.graphicsPaths.contains("figures/plot.png"))
+
+        let source = #"\ref{sec:v"#
+        let context = LatexCompletionService.context(
+            in: source,
+            selection: NSRange(location: (source as NSString).length, length: 0)
+        )
+        #expect(context?.kind == .reference)
+        #expect(
+            LatexCompletionService.completions(for: context!, index: index).map(\.label)
+                == ["sec:vectors"]
+        )
+    }
+
+    @Test
+    func parsesInverseSyncTeXTargetAndUsesPortableDecimals() {
+        let project = URL(fileURLWithPath: "/tmp/My Book", isDirectory: true)
+        let output = """
+        SyncTeX result begin
+        Input:sections/vectors.tex
+        Line:42
+        Column:-1
+        SyncTeX result end
+        """
+        let target = SyncTeXService.sourceTarget(from: output, projectURL: project)
+        #expect(target?.fileURL == project.appendingPathComponent("sections/vectors.tex"))
+        #expect(target?.line == 42)
+        #expect(target?.column == 1)
+
+        let argument = SyncTeXService.editPositionArgument(
+            previewPDFURL: project.appendingPathComponent("main.pdf"),
+            page: 3,
+            x: 12.5,
+            yFromTop: 48.25
+        )
+        #expect(argument.hasPrefix("3:12.500:48.250:"))
+    }
 }
 
 private func makeIsolatedDefaults() -> UserDefaults {
