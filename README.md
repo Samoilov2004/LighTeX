@@ -9,19 +9,22 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/download/v0.6.0-beta.1/LighTex-0.6.0-beta.1-arm64.dmg">
-    <img src="https://img.shields.io/badge/Download_Beta_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download the LighTex beta for Apple Silicon">
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Apple-Silicon.dmg">
+    <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for an Apple Silicon Mac">
+  </a>
+  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Intel.dmg">
+    <img src="https://img.shields.io/badge/Download_for_macOS-Intel_Mac-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for an Intel Mac">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/download/v0.6.0-beta.1/LighTex-0.6.0-beta.1-x86_64.dmg">Download the beta for an Intel Mac</a>
+  Requires macOS 14 or newer · Not sure which version? Open <strong>Apple menu → About This Mac</strong>.
 </p>
 
 > [!IMPORTANT]
 > **macOS may block LighTex on the first launch.**
 >
-> LighTex is currently distributed directly through GitHub and is **not notarized by Apple yet**.
+> LighTex is distributed directly through GitHub and is **not notarized by Apple yet**.
 > This means macOS Gatekeeper may show a warning even though you intentionally downloaded the app.
 >
 > To open LighTex:
@@ -48,7 +51,7 @@
 2. Open it and drag **LighTex** into **Applications**.
 3. Start LighTex and choose the recommended **Standard** LaTeX runtime.
 
-This beta is not notarized by Apple yet. If macOS blocks the first
+This release is not notarized by Apple yet. If macOS blocks the first
 launch, Control-click **LighTex** in Finder, choose **Open**, then confirm
 **Open**. You only need to do this once.
 
@@ -57,6 +60,9 @@ launch, Control-click **LighTex** in Finder, choose **Open**, then confirm
 - A native macOS source editor and PDF preview in one window.
 - Local projects: your `.tex`, images, bibliography, and PDF stay in a normal folder.
 - Multiple open files, project navigation, document outline, and SyncTeX jumps.
+- Project-wide search and replace, grouped build diagnostics, and PDF search.
+- Reusable project templates and a compact shelf for symbols, equations, figures, and tables.
+- Protection against unsaved work and files changed by another application.
 - Autosave and calm Auto Compile after you stop typing.
 - pdfLaTeX, XeLaTeX, and LuaLaTeX through a managed downloadable runtime.
 - Signed runtime manifests, SHA-256 verification, and atomic installation.
@@ -70,4 +76,4 @@ Requires macOS 14 or newer. Choose the main button for Apple Silicon Macs
 Build instructions, clean-room testing, release architecture, and required
 tools are documented in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-LighTex is currently a light-mode preview distributed directly through GitHub.
+LighTex is a light-mode macOS application distributed directly through GitHub.
