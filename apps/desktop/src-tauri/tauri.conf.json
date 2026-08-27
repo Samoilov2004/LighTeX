@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LighTex",
+  "version": "1.1.0",
+  "identifier": "app.lightex.editor",
+  "build": {
+    "beforeDevCommand": "pnpm dev:web",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "LighTex",
+        "width": 1320,
+        "height": 820,
+        "minWidth": 820,
+        "minHeight": 600,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 18 }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost https://github.com https://objects.githubusercontent.com"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb"],
+    "icon": [
+      "icons/icon.png",
+      "../../../Resources/AppIcon.icns"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "A focused cross-platform LaTeX editor",
+    "longDescription": "Edit local LaTeX projects with a live PDF preview, SyncTeX navigation, project search, templates, and managed TeX runtimes.",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "librsvg2-2"]
+      }
+    }
+  }
+}

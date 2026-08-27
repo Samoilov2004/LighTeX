@@ -3,6 +3,15 @@ dist/
 .DS_Store
 Resources/AppIcon.iconset/
 runtime-output/
+node_modules/
+.pnpm-store/
+apps/desktop/dist/
+apps/desktop/src-tauri/target/
+target/
+coverage/
+playwright-report/
+test-results/
+__pycache__/
 
 # Signing credentials must never enter the repository.
 .env
