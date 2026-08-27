@@ -18,10 +18,6 @@
 </p>
 
 <p align="center">
-  Requires macOS 14 or newer · Not sure which version? Open <strong>Apple menu → About This Mac</strong>.
-</p>
-
-<p align="center">
   <img src="Resources/LighTex-Demo.gif" width="1100" alt="LighTex editing a multi-file mathematical article with a live PDF preview and Insert Shelf">
 </p>
 
@@ -48,6 +44,10 @@
 >
 > **Do not disable Gatekeeper globally.**
 
+## Feedback
+
+Found a bug or have an idea for improving LighTex?  
+[Open an issue](https://github.com/Samoilov2004/LighTeX/issues) — suggestions and feedback are welcome.
 
 ## Install
 
