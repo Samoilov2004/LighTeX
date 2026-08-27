@@ -1,0 +1,107 @@
+name: Build LighTex Runtime v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_version:
+        description: Runtime version
+        required: true
+        default: "2026.1"
+      texlive_year:
+        description: TeX Live year
+        required: true
+        default: "2026"
+      publish:
+        description: Replace runtime-v2-latest after all nine assets pass
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require only the Ed25519 manifest key
+        env:
+          RUNTIME_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
+        run: test -n "$RUNTIME_SIGNING_PRIVATE_KEY_BASE64"
+
+  build:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [minimal, standard, full]
+        platform:
+          - name: macOs
+            architecture: arm64
+            runner: macos-15
+          - name: macOs
+            architecture: x86_64
+            runner: macos-15-intel
+          - name: linux
+            architecture: x86_64
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify architecture
+        run: test "$(uname -m)" = "${{ matrix.platform.architecture }}"
+      - name: Build portable TeX Live runtime
+        env:
+          CODE_SIGN_IDENTITY: "-"
+        run: |
+          ./scripts/build-runtime-v2.sh \
+            "${{ matrix.variant }}" \
+            "${{ matrix.platform.name }}" \
+            "${{ matrix.platform.architecture }}" \
+            "${{ inputs.runtime_version }}" \
+            "$RUNNER_TEMP/runtime-output"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.variant }}-${{ matrix.platform.name }}-${{ matrix.platform.architecture }}
+          path: ${{ runner.temp }}/runtime-output/*
+          compression-level: 0
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-*
+          path: runtime-assets
+          merge-multiple: true
+      - run: python3 scripts/split-runtime-release-assets.py runtime-assets
+      - name: Generate and sign schema v2 manifest
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
+        run: |
+          python3 scripts/generate-runtime-v2-manifest.py \
+            --metadata-directory runtime-assets \
+            --runtime-version "${{ inputs.runtime_version }}" \
+            --texlive-year "${{ inputs.texlive_year }}" \
+            --release-base-url "https://github.com/${{ github.repository }}/releases/download/runtime-v2-latest" \
+            --output runtime-assets/runtime-manifest.json
+          echo "$SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/runtime-signing-key.pem"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/runtime-signing-key.pem" \
+            -in runtime-assets/runtime-manifest.json -out runtime-assets/runtime-manifest.sig
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-v2-release-assets
+          path: runtime-assets/*
+          compression-level: 0
+      - name: Publish only after explicit approval
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view runtime-v2-latest >/dev/null 2>&1 || \
+            gh release create runtime-v2-latest --target "${{ github.sha }}" --title "LighTex Runtime v2" --prerelease \
+              --notes "Signed managed TeX Live runtimes for LighTex 1.1 on macOS and Linux."
+          gh release upload runtime-v2-latest runtime-assets/*.zip* runtime-assets/runtime-manifest.json runtime-assets/runtime-manifest.sig --clobber
