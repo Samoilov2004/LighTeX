@@ -1,0 +1,45 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Variational methods turn differential equations into operator equations on
+function spaces. This viewpoint is especially effective for elliptic boundary
+value problems: weak solutions require fewer classical derivatives, and the
+same bilinear form directly defines a stable numerical method. Standard
+references include \cite{ciarlet1978,brenner2008,ern2004}.
+
+Let $\Omega\subset\R^2$ be a bounded polygonal domain. We consider
+\begin{equation}
+  -\nabla\!\cdot\!\bigl(A(x)\nabla u\bigr)+c(x)u=f
+  \quad\text{in }\Omega,
+  \qquad
+  u=0
+  \quad\text{on }\partial\Omega.
+  \label{eq:strong-problem}
+\end{equation}
+The diffusion tensor $A$ is assumed symmetric and uniformly positive definite:
+there are constants $0<\alpha\leq\beta$ such that
+\begin{equation}
+  \alpha\lvert\xi\rvert^2
+  \leq \xi^{\mathsf T}A(x)\xi
+  \leq \beta\lvert\xi\rvert^2
+  \qquad
+  \text{for a.e. }x\in\Omega,
+  \quad \xi\in\R^2.
+  \label{eq:uniform-ellipticity}
+\end{equation}
+We also assume $c\in L^\infty(\Omega)$ with $c\geq0$ and
+$f\in L^2(\Omega)$.
+
+The central question is quantitative: if $u_h$ is computed in a finite
+dimensional space with mesh size $h$, how rapidly does $u_h$ approach $u$?
+The answer separates into stability and approximation. Galerkin
+orthogonality supplies the stability mechanism; interpolation theory supplies
+the approximation rate.
+
+\paragraph{Structure of the paper.}
+\Cref{sec:weak-formulation} establishes the continuous problem.
+\Cref{sec:galerkin} introduces the conforming method, and
+\cref{sec:error-estimates} proves energy- and $L^2$-norm estimates.
+The experiment in \cref{sec:numerics} checks the asymptotic rates.
+
+% DEMO: Add one sentence here explaining why coercivity is indispensable.

@@ -1,0 +1,32 @@
+\begin{tikzpicture}
+  \begin{loglogaxis}[
+    width=0.78\textwidth,
+    height=0.46\textwidth,
+    xlabel={mesh size $h$},
+    ylabel={$H^1$ error},
+    xmin=0.012,xmax=0.30,
+    ymin=0.009,ymax=0.30,
+    grid=both,
+    minor grid style={gray!12},
+    major grid style={gray!28},
+    legend pos=north west,
+    legend cell align=left
+  ]
+    \addplot[
+      blue!70!black,
+      very thick,
+      mark=*,
+      mark options={fill=white}
+    ] table[x=h,y=energy_error,col sep=comma] {data/convergence.csv};
+    \addlegendentry{Galerkin error}
+
+    \addplot[
+      black!60,
+      dashed,
+      thick,
+      domain=0.015625:0.25,
+      samples=2
+    ] {0.84*x};
+    \addlegendentry{$O(h)$ reference}
+  \end{loglogaxis}
+\end{tikzpicture}

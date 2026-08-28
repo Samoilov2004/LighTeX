@@ -1,24 +1,32 @@
 import { useEffect, useState } from "react";
-import { FilePlus2, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
+import { ArrowLeft, FilePlus2, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
+import { desktopDir } from "@tauri-apps/api/path";
 import { api, isDesktop } from "../api";
 import { useAppStore } from "../store";
 import type { PersonalTemplateManifestV2, TemplateReview } from "../types";
 import { renderFirstPagePreview } from "../pdf";
 import { useModalFocus } from "../useModalFocus";
+import appIcon from "../assets/AppIcon128.png";
+import articlePreview from "../assets/template-previews/article.png";
+import mathematicsPreview from "../assets/template-previews/mathematics.png";
+import textbookPreview from "../assets/template-previews/textbook.png";
+import presentationPreview from "../assets/template-previews/presentation.png";
+import { WindowDragRegion } from "./WindowDragRegion";
 
 interface TemplateDefinition {
   id: string;
   name: string;
   summary: string;
-  style: string;
+  kind: string;
+  preview: string;
 }
 
 const templates: TemplateDefinition[] = [
-  { id: "article", name: "Article", summary: "Abstract, sections, figures, and references.", style: "article" },
-  { id: "mathematics", name: "Mathematics", summary: "Theorems, definitions, proofs, and aligned equations.", style: "math" },
-  { id: "textbook", name: "Textbook", summary: "A book structure with contents, chapters, and figures.", style: "book" },
-  { id: "presentation", name: "Presentation", summary: "A restrained Beamer deck for technical talks.", style: "slides" },
+  { id: "article", name: "Article", summary: "Abstract, sections, figures, and references.", kind: "Paper", preview: articlePreview },
+  { id: "mathematics", name: "Mathematics", summary: "Theorems, proofs, and aligned equations.", kind: "Math", preview: mathematicsPreview },
+  { id: "textbook", name: "Textbook", summary: "Contents, chapters, exercises, and figures.", kind: "Book", preview: textbookPreview },
+  { id: "presentation", name: "Presentation", summary: "A restrained Beamer deck for technical talks.", kind: "Slides", preview: presentationPreview },
 ];
 
 export function ProjectHub() {
@@ -29,6 +37,7 @@ export function ProjectHub() {
   const [personal, setPersonal] = useState<PersonalTemplateManifestV2[]>([]);
   const [review, setReview] = useState<TemplateReview | null>(null);
   const [hubError, setHubError] = useState<string | null>(null);
+  const [screen, setScreen] = useState<"projects" | "templates">("projects");
   useEffect(() => {
     if (isDesktop()) void api.listPersonalTemplates().then(setPersonal).catch((error) => setHubError(String(error)));
   }, []);
@@ -76,36 +85,13 @@ export function ProjectHub() {
   }, []);
   return (
     <main className="hub-view">
-      <div className="hub-toolbar" data-tauri-drag-region>
-        <div data-tauri-drag-region className="toolbar-spacer" />
+      <div className="hub-toolbar">
+        {screen === "templates" && <button className="icon-button project-back" onClick={() => setScreen("projects")} aria-label="Back to Projects" title="Projects"><ArrowLeft size={16} /></button>}
+        <WindowDragRegion />
         <button className="icon-button" onClick={() => useAppStore.setState({ settingsOpen: true })} aria-label="Open Settings" title="Settings"><Settings size={16} /></button>
       </div>
-      <div className="hub-content">
-        <header className="hub-heading"><h1>LighTex</h1><p>A focused workspace for local LaTeX projects.</p></header>
-        <div className="hub-actions">
-          <button className="primary-button large" onClick={() => setCreate({ template: "empty", title: "New Empty Project" })}><FilePlus2 size={17} />New Empty Project</button>
-          <button className="secondary-button large" onClick={chooseFolder}><FolderOpen size={17} />Open Project</button>
-          <button className="secondary-button large" onClick={() => document.getElementById("templates")?.scrollIntoView()}><LayoutTemplate size={17} />Templates</button>
-        </div>
-        <section className="recent-section">
-          <div className="section-heading"><h2>Recent Projects</h2>{config.recentProjects.length > 0 && <button onClick={() => void clearRecent()}>Clear</button>}</div>
-          {config.recentProjects.length === 0 ? <p className="empty-copy">Projects you open will appear here. Their files always remain in normal folders.</p> : (
-            <div className="recent-list">{config.recentProjects.map((path) => <button key={path} onClick={() => openProject(path)}><FolderOpen size={15} /><span><strong>{fileName(path)}</strong><small>{path}</small></span></button>)}</div>
-          )}
-        </section>
-        <section className="templates-section" id="templates">
-          <div className="section-heading"><h2>Yours</h2></div>
-          {personal.length === 0 ? <div className="personal-template-empty"><LayoutTemplate size={21} /><span><strong>No personal templates yet</strong><small>Reusable copies of your own projects will appear here.</small></span><button className="secondary-button" onClick={() => void reviewTemplate()}>Create Template</button></div> : <>
-            <div className="personal-template-actions"><button className="secondary-button" onClick={() => void reviewTemplate()}><FilePlus2 size={14} />Create Template</button></div>
-            <div className="template-grid personal-grid">{personal.map((template) => <div className="template-card personal-template-card" key={template.id}>
-              <button className="template-open" onClick={() => setCreate({ template: `personal:${template.id}`, title: `New ${template.name}` })}><PersonalTemplatePreview template={template} /><span><strong>{template.name}</strong><small>{template.mainDocument ?? "Project template"}</small></span></button>
-              <button className="icon-button template-delete" aria-label={`Remove ${template.name}`} onClick={() => void removeTemplate(template)}><Trash2 size={13} /></button>
-            </div>)}</div>
-          </>}
-          <div className="section-heading bundled"><h2>LighTex Templates</h2></div>
-          <div className="template-grid">{templates.map((template) => <button className="template-card" key={template.id} onClick={() => setCreate({ template: template.id, title: `New ${template.name}` })}><TemplatePreview styleName={template.style} /><span><strong>{template.name}</strong><small>{template.summary}</small></span></button>)}</div>
-        </section>
-      </div>
+      {screen === "projects" ? <ProjectsScreen config={config} openProject={openProject} chooseFolder={chooseFolder} clearRecent={clearRecent} onNewEmpty={() => setCreate({ template: "empty", title: "New Empty Project" })} onShowTemplates={() => setScreen("templates")} /> :
+        <TemplatesScreen personal={personal} onReviewTemplate={reviewTemplate} onRemoveTemplate={removeTemplate} onCreate={(template, title) => setCreate({ template, title })} />}
       {create && <CreateProjectDialog template={create.template} title={create.title} onClose={() => setCreate(null)} onCreated={openProject} />}
       {review && <TemplateReviewDialog review={review} onClose={() => setReview(null)} onCreated={async () => { setReview(null); setPersonal(await api.listPersonalTemplates()); }} />}
       {hubError && <div className="error-toast" role="alert">{hubError}<button className="icon-button" onClick={() => setHubError(null)} aria-label="Dismiss error">×</button></div>}
@@ -113,13 +99,74 @@ export function ProjectHub() {
   );
 }
 
+function ProjectsScreen({ config, openProject, chooseFolder, clearRecent, onNewEmpty, onShowTemplates }: {
+  config: ReturnType<typeof useAppStore.getState>["config"];
+  openProject(path: string): Promise<void>;
+  chooseFolder(): Promise<void>;
+  clearRecent(): Promise<void>;
+  onNewEmpty(): void;
+  onShowTemplates(): void;
+}) {
+  return <div className="hub-content projects-content">
+    <header className="hub-heading">
+      <img src={appIcon} alt="" />
+      <div><h1>LighTex</h1><p>A lightweight local LaTeX editor</p></div>
+    </header>
+    <div className="hub-overview">
+      <section className="start-section" aria-labelledby="start-heading">
+        <h2 id="start-heading">Start</h2>
+        <div className="hub-actions">
+          <button className="primary-button large" onClick={onNewEmpty}><FilePlus2 size={17} />New Empty Project</button>
+          <button className="secondary-button large" onClick={() => void chooseFolder()}><FolderOpen size={17} />Open Project…</button>
+          <button className="secondary-button large" onClick={onShowTemplates}><LayoutTemplate size={17} />New from Template</button>
+        </div>
+      </section>
+      <section className="recent-section" aria-labelledby="recent-heading">
+        <div className="section-heading"><h2 id="recent-heading">Recent Projects</h2>{config.recentProjects.length > 0 && <button onClick={() => void clearRecent()}>Clear</button>}</div>
+        {config.recentProjects.length === 0 ? <div className="recent-empty"><FolderOpen size={18} /><span><strong>No recent projects</strong><small>Projects you open will appear here. Local files are never moved.</small></span></div> : (
+          <div className="recent-list">{config.recentProjects.map((path) => <button key={path} title={path} onClick={() => void openProject(path)}><FolderOpen size={15} /><span><strong>{fileName(path)}</strong><small>{path}</small></span></button>)}</div>
+        )}
+      </section>
+    </div>
+  </div>;
+}
+
+function TemplatesScreen({ personal, onReviewTemplate, onRemoveTemplate, onCreate }: {
+  personal: PersonalTemplateManifestV2[];
+  onReviewTemplate(): Promise<void>;
+  onRemoveTemplate(template: PersonalTemplateManifestV2): Promise<void>;
+  onCreate(template: string, title: string): void;
+}) {
+  return <div className="hub-content templates-content">
+    <header className="templates-heading"><h1>Templates</h1><p>Start a new project from a reusable layout.</p></header>
+    <section className="templates-section" aria-labelledby="personal-templates-heading">
+      <div className="section-heading"><h2 id="personal-templates-heading">Yours</h2></div>
+      {personal.length === 0 ? <div className="personal-template-empty"><LayoutTemplate size={21} /><span><strong>No personal templates yet</strong><small>Save one of your projects here to reuse it later.</small></span><button className="secondary-button" onClick={() => void onReviewTemplate()}>Create Template</button></div> : <>
+        <div className="personal-template-actions"><button className="secondary-button" onClick={() => void onReviewTemplate()}><FilePlus2 size={14} />Create Template</button></div>
+        <div className="template-grid personal-grid">{personal.map((template) => <div className="template-card personal-template-card" key={template.id}>
+          <button className="template-open" onClick={() => onCreate(`personal:${template.id}`, `New ${template.name}`)}><PersonalTemplatePreview template={template} /><span><strong>{template.name}</strong><small>{template.mainDocument ?? "Project template"}</small></span></button>
+          <button className="icon-button template-delete" aria-label={`Remove ${template.name}`} onClick={() => void onRemoveTemplate(template)}><Trash2 size={13} /></button>
+        </div>)}</div>
+      </>}
+      <div className="section-heading bundled"><h2>LighTex Templates</h2></div>
+      <div className="template-grid">{templates.map((template) => <button className="template-card" key={template.id} onClick={() => onCreate(template.id, `New ${template.name}`)}><TemplatePreview kind={template.kind} preview={template.preview} name={template.name} /><span><strong>{template.name}</strong><small>{template.summary}</small></span></button>)}</div>
+    </section>
+  </div>;
+}
+
 function CreateProjectDialog({ template, title, onClose, onCreated }: { template: string; title: string; onClose(): void; onCreated(path: string): void }) {
   const [name, setName] = useState(template === "empty" ? "Untitled" : `My ${title.replace("New ", "")}`);
   const [parent, setParent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const dialog = useModalFocus<HTMLFormElement>(onClose);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let active = true;
+    void desktopDir().then((path) => { if (active) setParent(path); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   const choose = async () => {
-    const selected = await open({ directory: true, multiple: false, title: "Choose Project Location" });
+    const selected = await open({ directory: true, multiple: false, title: "Choose Project Location", defaultPath: parent || undefined });
     if (typeof selected === "string") setParent(selected);
   };
   const submit = async () => {
@@ -188,11 +235,13 @@ function PersonalTemplatePreview({ template }: { template: PersonalTemplateManif
     if (!template.preview) return;
     void api.personalTemplatePreview(template.id).then((value) => setPreview(value ? `data:image/png;base64,${value}` : null));
   }, [template.id, template.preview]);
-  return preview ? <span className="template-preview image"><img src={preview} alt="" /></span> : <TemplatePreview styleName="personal" />;
+  return preview ? <span className="template-preview image"><img src={preview} alt={`${template.name} first-page preview`} /></span> : <TemplatePreview kind="Yours" icon={<LayoutTemplate size={29} strokeWidth={1.55} />} name={template.name} />;
 }
 
-function TemplatePreview({ styleName }: { styleName: string }) {
-  return <span className={`template-preview ${styleName}`} aria-hidden="true"><i /><b /><i /><i /><em /></span>;
+function TemplatePreview({ kind, name, preview, icon }: { kind: string; name: string; preview?: string; icon?: React.ReactNode }) {
+  return preview
+    ? <span className="template-preview image"><img src={preview} alt={`${name} first-page preview`} /><span className="template-kind">{kind}</span></span>
+    : <span className="template-preview" aria-hidden="true"><span className="template-icon">{icon}</span><span className="template-kind">{kind}</span></span>;
 }
 
 const fileName = (path: string) => path.split("/").filter(Boolean).pop() ?? path;

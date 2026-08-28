@@ -22,9 +22,9 @@ export function FileTree(props: FileTreeProps) {
   return (
     <div className="files-panel">
       <div className="sidebar-actions" aria-label="File actions">
-        <button className="icon-button" onClick={() => props.onCreateFile("")} aria-label="Create file" title="Create file"><FilePlus2 size={15} /></button>
-        <button className="icon-button" onClick={() => props.onCreateFolder("")} aria-label="Create folder" title="Create folder"><FolderPlus size={15} /></button>
-        <button className="icon-button" onClick={() => props.onUpload("")} aria-label="Upload files or folder" title="Upload"><FolderUp size={15} /></button>
+        <button className="sidebar-action-button" onClick={() => props.onCreateFile("")} aria-label="Create file" title="Create file"><FilePlus2 size={14} /><span>File</span></button>
+        <button className="sidebar-action-button" onClick={() => props.onCreateFolder("")} aria-label="Create folder" title="Create folder"><FolderPlus size={14} /><span>Folder</span></button>
+        <button className="sidebar-action-button" onClick={() => props.onUpload("")} aria-label="Upload files or folder" title="Upload files or folder"><FolderUp size={14} /><span>Upload</span></button>
       </div>
       <div className="file-tree" role="tree" aria-label="Project files">
         {props.entries.map((entry) => <FileRow key={entry.relativePath} entry={entry} depth={0} {...props} />)}
@@ -73,7 +73,7 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
           ? expanded ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />
           : <span className="tree-chevron-placeholder" />}
         {entry.isDirectory ? <Folder size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
-        <button className="file-name-button" onClick={open}>{entry.name}</button>
+        <button className="file-name-button" onClick={open} title={entry.relativePath}>{entry.name}</button>
         {entry.relativePath === props.mainDocument && <span className="main-label">MAIN</span>}
       </div>
       {entry.isDirectory && expanded && entry.children.map((child) => (

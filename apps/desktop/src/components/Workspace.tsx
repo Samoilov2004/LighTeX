@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, BookOpen, Braces, Bug, FileText, Folder, ListTree, PanelLeft, PanelRight, Play, Search, Settings, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, CircleAlert, FileText, Folder, ListTree, PanelLeft, PanelRight, Play, Search, Settings, Sigma, Square } from "lucide-react";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -13,6 +13,7 @@ import { PdfPreview } from "./PdfPreview";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { SearchPanel } from "./SearchPanel";
 import { SourceEditor } from "./SourceEditor";
+import { WindowDragRegion } from "./WindowDragRegion";
 import type { SyncTeXPdfTarget } from "../types";
 import { useModalFocus } from "../useModalFocus";
 
@@ -152,16 +153,22 @@ export function Workspace() {
 
   return (
     <main className="workspace">
-      <header className="project-toolbar" data-tauri-drag-region>
-        <button className="icon-button project-back" onClick={() => void state.leaveProject()} aria-label="Back to Projects" title="Projects"><ArrowLeft size={16} /></button>
-        <button className="icon-button" onClick={() => useAppStore.setState({ sidebarVisible: !state.sidebarVisible })} aria-label="Toggle project sidebar" aria-pressed={state.sidebarVisible}><PanelLeft size={16} /></button>
-        <div className="toolbar-spacer" data-tauri-drag-region />
-        <button className="icon-button" onClick={() => useAppStore.setState({ insertShelfOpen: !state.insertShelfOpen })} aria-label="Toggle Insert Shelf" aria-pressed={state.insertShelfOpen} title="Insert Shelf"><Sparkles size={16} /></button>
-        <button className="icon-button" onClick={() => useAppStore.setState({ problemsOpen: !state.problemsOpen })} aria-label="Toggle Problems" aria-pressed={state.problemsOpen} title="Problems"><Bug size={16} /></button>
-        <label className="auto-compile"><input type="checkbox" checked={state.config.automaticBuilds} onChange={(event) => state.updateConfig({ automaticBuilds: event.target.checked })} /><span>Auto Compile</span></label>
-        <button className="primary-button compact" onClick={() => void (state.buildState === "building" ? state.cancelBuild() : state.build())}>{state.buildState === "building" ? <Square size={11} fill="currentColor" /> : <Play size={13} fill="currentColor" />}{state.buildState === "building" ? "Cancel" : "Recompile"}</button>
-        <button className="icon-button" onClick={() => useAppStore.setState({ pdfVisible: !state.pdfVisible })} aria-label="Toggle PDF preview" aria-pressed={state.pdfVisible}><PanelRight size={16} /></button>
-        <button className="icon-button" onClick={() => useAppStore.setState({ settingsOpen: true })} aria-label="Open Settings"><Settings size={16} /></button>
+      <header className="project-toolbar">
+        <button className="toolbar-button project-back-control" onClick={() => void state.leaveProject()} aria-label="Back to Projects" title="Back to Projects"><ArrowLeft size={16} /><span>Projects</span></button>
+        <button className="icon-button" onClick={() => useAppStore.setState({ sidebarVisible: !state.sidebarVisible })} aria-label="Toggle project sidebar" aria-pressed={state.sidebarVisible} title="Project sidebar"><PanelLeft size={16} /></button>
+        <WindowDragRegion />
+        <div className="project-toolbar-group" role="group" aria-label="Editor panels">
+          <button className={`toolbar-button ${state.insertShelfOpen ? "pressed" : ""}`} onClick={() => useAppStore.setState({ insertShelfOpen: !state.insertShelfOpen })} aria-label="Toggle Insert Shelf" aria-pressed={state.insertShelfOpen} title="Symbols, equations, figures, and tables"><Sigma size={15} /><span>Insert</span></button>
+          <button className={`toolbar-button ${state.problemsOpen ? "pressed" : ""}`} onClick={() => useAppStore.setState({ problemsOpen: !state.problemsOpen })} aria-label="Toggle Problems" aria-pressed={state.problemsOpen} title="Problems"><CircleAlert size={15} /><span>Problems</span></button>
+        </div>
+        <div className="project-toolbar-group build-controls" role="group" aria-label="Build controls">
+          <label className="auto-compile"><input type="checkbox" checked={state.config.automaticBuilds} onChange={(event) => state.updateConfig({ automaticBuilds: event.target.checked })} /><span>Auto Compile</span></label>
+          <button className="primary-button compact" onClick={() => void (state.buildState === "building" ? state.cancelBuild() : state.build())}>{state.buildState === "building" ? <Square size={11} fill="currentColor" /> : <Play size={13} fill="currentColor" />}{state.buildState === "building" ? "Cancel" : "Recompile"}</button>
+        </div>
+        <div className="project-toolbar-group" role="group" aria-label="Window controls">
+          <button className="icon-button" onClick={() => useAppStore.setState({ pdfVisible: !state.pdfVisible })} aria-label="Toggle PDF preview" aria-pressed={state.pdfVisible} title="PDF preview"><PanelRight size={16} /></button>
+          <button className="icon-button" onClick={() => useAppStore.setState({ settingsOpen: true })} aria-label="Open Settings" title="Settings"><Settings size={16} /></button>
+        </div>
       </header>
       <div className="workspace-main" style={{ gridTemplateColumns: state.sidebarVisible ? `${sidebarWidth}px 5px 1fr` : "1fr" }}>
         {state.sidebarVisible && <>
@@ -180,18 +187,21 @@ export function Workspace() {
           <ResizeDivider axis="x" onMove={(delta) => setSidebarWidth((width) => Math.max(185, Math.min(330, width + delta)))} />
         </>}
         <div className="document-area">
-          <EditorTabs tabs={state.tabs} selectedPath={state.selectedPath} documents={state.documents} onSelect={state.selectDocument} onClose={(path) => void state.closeDocument(path)} onReorder={state.reorderTabs} onMove={state.moveTab} onFileDrop={(path) => void state.openDocument(path)} />
-          {selectedDocument && selectedDocument.externalChange !== "none" && <div className="conflict-banner" role="alert">
-            <span>{selectedDocument.externalChange === "deleted" ? `${selectedDocument.relativePath} was deleted outside LighTex.` : `${selectedDocument.relativePath} changed outside LighTex.`}</span>
-            {selectedDocument.externalChange === "modified" && <button onClick={() => state.resolveConflict(selectedDocument.relativePath, "reload")}>Reload</button>}
-            {selectedDocument.externalChange === "modified" && <button onClick={() => state.resolveConflict(selectedDocument.relativePath, "keep")}>Keep Mine</button>}
-            <button onClick={() => void saveConflictCopy(selectedDocument.relativePath)}>{selectedDocument.externalChange === "deleted" ? "Save As" : "Save Copy"}</button>
-            {selectedDocument.externalChange === "deleted" && <button onClick={() => void state.closeDocument(selectedDocument.relativePath)}>Close</button>}
-          </div>}
           <div className="editor-pdf-split" style={editorStyle}>
-            <section className="source-pane" aria-label="Source editor">
-              {selectedDocument ? <SourceEditor key={selectedDocument.relativePath} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onChange={(text) => state.updateText(selectedDocument.relativePath, text)} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
-            </section>
+            <div className="source-column">
+              <EditorTabs tabs={state.tabs} selectedPath={state.selectedPath} documents={state.documents} onSelect={state.selectDocument} onClose={(path) => void state.closeDocument(path)} onReorder={state.reorderTabs} onMove={state.moveTab} onFileDrop={(path) => void state.openDocument(path)} />
+              {selectedDocument && selectedDocument.externalChange !== "none" && <div className="conflict-banner" role="alert">
+                <span>{selectedDocument.externalChange === "deleted" ? `${selectedDocument.relativePath} was deleted outside LighTex.` : `${selectedDocument.relativePath} changed outside LighTex.`}</span>
+                {selectedDocument.externalChange === "modified" && <button onClick={() => state.resolveConflict(selectedDocument.relativePath, "reload")}>Reload</button>}
+                {selectedDocument.externalChange === "modified" && <button onClick={() => state.resolveConflict(selectedDocument.relativePath, "keep")}>Keep Mine</button>}
+                <button onClick={() => void saveConflictCopy(selectedDocument.relativePath)}>{selectedDocument.externalChange === "deleted" ? "Save As" : "Save Copy"}</button>
+                {selectedDocument.externalChange === "deleted" && <button onClick={() => void state.closeDocument(selectedDocument.relativePath)}>Close</button>}
+              </div>}
+              <section className="source-pane" aria-label="Source editor">
+                {selectedDocument ? <SourceEditor key={selectedDocument.relativePath} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onChange={(text) => state.updateText(selectedDocument.relativePath, text)} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
+              </section>
+              {state.insertShelfOpen && <InsertShelf onClose={() => useAppStore.setState({ insertShelfOpen: false })} />}
+            </div>
             {state.pdfVisible && <>
               <ResizeDivider axis="x" onMove={(delta) => setEditorFraction((fraction) => Math.max(0.3, Math.min(0.7, fraction + delta / Math.max(700, window.innerWidth - sidebarWidth))))} />
               <PdfPreview base64={state.pdfBase64} target={pdfTarget} onInverse={async (page, x, y) => {
@@ -201,7 +211,6 @@ export function Workspace() {
               }} />
             </>}
           </div>
-          {state.insertShelfOpen && <InsertShelf onClose={() => useAppStore.setState({ insertShelfOpen: false })} />}
           {state.problemsOpen && <ProblemsPanel />}
         </div>
       </div>
@@ -212,7 +221,7 @@ export function Workspace() {
         <span>{state.selectedPath ?? "No file"}</span>
         <span>UTF-8</span>
       </footer>
-      {uploadTarget !== null && <div className="modal-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setUploadTarget(null); }}><section ref={uploadDialog} className="native-dialog upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-title"><h2 id="upload-title">Add to Project</h2><p>Choose files or copy an entire folder into {uploadTarget || "the project root"}. Existing items are never overwritten.</p><div className="dialog-actions"><button className="secondary-button" onClick={() => setUploadTarget(null)}>Cancel</button><button className="secondary-button" onClick={() => { const target = uploadTarget; setUploadTarget(null); void chooseUpload(target, true); }}>Choose Folder…</button><button className="primary-button" onClick={() => { const target = uploadTarget; setUploadTarget(null); void chooseUpload(target, false); }}>Choose Files…</button></div></section></div>}
+      {uploadTarget !== null && <div className="modal-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setUploadTarget(null); }}><section ref={uploadDialog} className="native-dialog upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-title"><h2 id="upload-title">Upload to Project</h2><p>Choose files or copy an entire folder into {uploadTarget || "the project root"}. Existing items are never overwritten.</p><div className="dialog-actions"><button className="secondary-button" onClick={() => setUploadTarget(null)}>Cancel</button><button className="secondary-button" onClick={() => { const target = uploadTarget; setUploadTarget(null); void chooseUpload(target, true); }}>Choose Folder…</button><button className="primary-button" onClick={() => { const target = uploadTarget; setUploadTarget(null); void chooseUpload(target, false); }}>Choose Files…</button></div></section></div>}
       {nameRequest && <NameDialog request={nameRequest} onClose={() => setNameRequest(null)} onSubmit={commitName} />}
     </main>
   );

@@ -7,12 +7,17 @@ import { useAppStore } from "../store";
 describe("ProjectHub", () => {
   beforeEach(() => useAppStore.setState({ config: defaultConfig, phase: "hub", settingsOpen: false }));
 
-  it("keeps personal templates first and has no unnecessary template search", () => {
+  it("keeps templates off the Projects screen and opens the dedicated Templates screen", () => {
     render(<ProjectHub />);
+    expect(screen.queryByRole("heading", { name: "Yours" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New from Template" }));
+    expect(screen.getByRole("heading", { name: "Templates" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Yours" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "LighTex Templates" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/search templates/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Template" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Projects" }));
+    expect(screen.getByRole("heading", { name: "LighTex" })).toBeInTheDocument();
   });
 
   it("opens the single Settings surface", () => {

@@ -18,31 +18,26 @@ def sha256(path: Path) -> str:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--variant", required=True)
-parser.add_argument("--architecture", required=True)
+parser.add_argument("--variant", choices=("minimal", "standard", "full"), required=True)
+parser.add_argument("--platform", choices=("macOs", "linux"), required=True)
+parser.add_argument("--architecture", choices=("arm64", "x86_64"), required=True)
 parser.add_argument("--archive", type=Path, required=True)
-parser.add_argument("--archive-part", type=Path, action="append", default=[])
 parser.add_argument("--payload", type=Path, required=True)
 parser.add_argument("--bin-relative", required=True)
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 
-tools = {
-    name: f"{args.bin_relative}/{name}"
-    for name in ("pdflatex", "xelatex", "lualatex", "latexmk", "synctex", "tlmgr")
-}
 metadata = {
     "variant": args.variant,
+    "platform": args.platform,
     "architecture": args.architecture,
     "archiveName": args.archive.name,
     "compressedSize": args.archive.stat().st_size,
     "installedSize": directory_size(args.payload),
     "sha256": sha256(args.archive),
-    "tools": tools,
+    "tools": {
+        name: f"{args.bin_relative}/{name}"
+        for name in ("pdflatex", "xelatex", "lualatex", "latexmk", "synctex", "tlmgr")
+    },
 }
-if args.archive_part:
-    metadata["archiveParts"] = [
-        {"archiveName": part.name, "compressedSize": part.stat().st_size}
-        for part in args.archive_part
-    ]
 args.output.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")

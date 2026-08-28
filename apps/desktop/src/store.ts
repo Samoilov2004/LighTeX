@@ -16,6 +16,7 @@ import type {
   ToolchainStatus,
 } from "./types";
 import { defaultConfig } from "./types";
+import { findExistingProjectPdf } from "./projectFiles";
 
 type AppPhase = "booting" | "setup" | "hub" | "project";
 export type SidebarMode = "files" | "search" | "outline";
@@ -275,6 +276,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         api.loadSession(project.rootPath),
       ]);
       const mainDocument = session?.mainDocument ?? project.mainDocument;
+      const existingPdf = findExistingProjectPdf(entries, mainDocument);
       set({
         phase: "project",
         project,
@@ -301,6 +303,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const item of initialTabs) await get().openDocument(item);
       const selected = session?.selectedDocument;
       if (selected && get().documents[selected]) get().selectDocument(selected);
+      if (existingPdf) {
+        const absolutePdfPath = `${project.rootPath.replace(/\/+$/, "")}/${existingPdf}`;
+        void api.readPreviewPdf(project.id, absolutePdfPath).then((pdfBase64) => {
+          if (get().project?.id === project.id && !get().buildResult) {
+            set({ pdfBase64, statusMessage: "Loaded existing PDF" });
+          }
+        }).catch((error) => {
+          if (get().project?.id === project.id) set({ error: `Could not load ${existingPdf}: ${String(error)}` });
+        });
+      }
       void get().refreshProject();
     } catch (error) {
       set({ error: String(error) });

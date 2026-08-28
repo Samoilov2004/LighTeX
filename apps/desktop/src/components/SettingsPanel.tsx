@@ -36,7 +36,7 @@ export function SettingsPanel({ onClose }: { onClose(): void }) {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
-  useEffect(() => { panel.current?.querySelector<HTMLElement>("button")?.focus(); }, []);
+  useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => { if (isDesktop()) void refreshStorage().catch((error) => setActivity(String(error))); }, [config.managedRuntimeRecordPath, installed.length]);
   const checkUpdates = async () => {
     setActivity("Checking GitHub Releases…");
@@ -66,7 +66,7 @@ export function SettingsPanel({ onClose }: { onClose(): void }) {
   };
   return (
     <div className="settings-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside ref={panel} className="settings-panel" role="dialog" aria-modal="true" aria-label="Settings" onKeyDown={(event) => {
+      <aside ref={panel} className="settings-panel" role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} onKeyDown={(event) => {
         if (event.key !== "Tab") return;
         const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])"));
         if (focusable.length === 0) return;

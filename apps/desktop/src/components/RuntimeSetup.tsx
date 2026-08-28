@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Check, Download, RefreshCw, WifiOff, X } from "lucide-react";
+import { Check, CheckCircle2, Download, RefreshCw, WifiOff, X } from "lucide-react";
 import { useAppStore } from "../store";
 import type { RuntimeAsset, RuntimeVariant } from "../types";
 import appIcon from "../assets/AppIcon128.png";
+import { WindowDragRegion } from "./WindowDragRegion";
 
 export function RuntimeSetup() {
   const system = useAppStore((state) => state.systemToolchain);
@@ -22,11 +23,11 @@ export function RuntimeSetup() {
 
   return (
     <main className="setup-view">
-      <div className="setup-toolbar" data-tauri-drag-region />
+      <WindowDragRegion className="setup-toolbar" />
       <div className="setup-content">
         <header>
           <img src={appIcon} alt="" className="setup-icon" />
-          <div><h1>Set up LaTeX</h1><p>LighTex needs a TeX installation before projects can be opened.</p></div>
+          <div><h1>Set up LaTeX</h1><p>Choose the TeX installation LighTex will use to build your documents.</p></div>
         </header>
         {hasSystem && (
           <section className="existing-tex">
@@ -34,7 +35,7 @@ export function RuntimeSetup() {
             <button className="primary-button" onClick={chooseSystem}><Check size={15} />Use Existing TeX</button>
           </section>
         )}
-        <div className="setup-divider"><span>or install a managed runtime</span></div>
+        <div className="setup-divider"><span>{hasSystem ? "Or install a managed runtime" : "Choose a managed runtime"}</span></div>
         <div className="runtime-cards">
           {(["minimal", "standard", "full"] as RuntimeVariant[]).map((item) => (
             <RuntimeCard key={item} variant={item} asset={assets.get(item)} selected={variant === item} onSelect={() => setVariant(item)} />
@@ -47,7 +48,7 @@ export function RuntimeSetup() {
           <RuntimeProgress event={runtimeEvent!} onCancel={cancel} />
         ) : (
           <div className="setup-footer">
-            <span>Standard is recommended for textbooks and mathematics.</span>
+            <span><strong>{capitalize(variant)}</strong>{variant === "standard" ? " is recommended for textbooks and mathematics." : " can be changed later in Settings."}</span>
             <button className="primary-button" disabled={!assets.has(variant)} onClick={() => install(variant)}><Download size={15} />Install {capitalize(variant)}</button>
           </div>
         )}
@@ -64,7 +65,7 @@ function RuntimeCard({ variant, asset, selected, onSelect }: { variant: RuntimeV
   };
   return (
     <button className={`runtime-card ${selected ? "selected" : ""}`} onClick={onSelect} aria-pressed={selected}>
-      <span className="runtime-card-title"><strong>{capitalize(variant)}</strong>{variant === "standard" && <small>RECOMMENDED</small>}</span>
+      <span className="runtime-card-title"><strong>{capitalize(variant)}</strong>{variant === "standard" && <small>RECOMMENDED</small>}{selected && <CheckCircle2 className="runtime-card-check" size={16} />}</span>
       <span>{summaries[variant]}</span>
       <span className="runtime-size">{asset ? `${formatBytes(asset.compressedSize)} download · ${formatBytes(asset.installedSize)} installed` : "Catalog unavailable"}</span>
     </button>

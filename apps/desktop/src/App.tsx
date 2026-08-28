@@ -48,16 +48,21 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!isDesktop()) return;
-    let allowClose = false;
+    const appWindow = getCurrentWindow();
+    let closing = false;
     let stopped = false;
     let unlisten: (() => void) | undefined;
-    void getCurrentWindow().onCloseRequested(async (event) => {
-      if (allowClose) return;
+    void appWindow.onCloseRequested(async (event) => {
       event.preventDefault();
-      const canClose = await useAppStore.getState().prepareApplicationClose();
-      if (canClose && !stopped) {
-        allowClose = true;
-        await getCurrentWindow().close();
+      if (closing) return;
+      closing = true;
+      try {
+        const canClose = await useAppStore.getState().prepareApplicationClose();
+        if (canClose && !stopped) await appWindow.destroy();
+      } catch (error) {
+        useAppStore.getState().setError(`Could not close LighTex: ${String(error)}`);
+      } finally {
+        if (!stopped) closing = false;
       }
     }).then((value) => { unlisten = value; });
     return () => { stopped = true; unlisten?.(); };

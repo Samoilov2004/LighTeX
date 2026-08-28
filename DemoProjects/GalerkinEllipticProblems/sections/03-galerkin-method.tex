@@ -1,0 +1,59 @@
+\section{The conforming Galerkin method}
+\label{sec:galerkin}
+
+Let $\{\Th\}_{h>0}$ be a shape-regular family of conforming triangulations of
+$\Omega$, and let $h=\max_{K\in\Th}\operatorname{diam}(K)$. For continuous,
+piecewise affine elements define
+\begin{equation}
+  \Vh
+  :=\left\{v_h\in C^0(\overline\Omega):
+  v_h|_K\in\mathbb P_1(K)\ \forall K\in\Th,
+  \quad v_h|_{\partial\Omega}=0\right\}.
+  \label{eq:finite-element-space}
+\end{equation}
+Because $\Vh\subset\V$, the approximation is conforming.
+
+The discrete problem is to find $u_h\in\Vh$ such that
+\begin{equation}
+  a(u_h,v_h)=F(v_h)
+  \qquad\text{for every }v_h\in\Vh.
+  \label{eq:discrete-problem}
+\end{equation}
+The same continuity and coercivity constants as in the continuous problem
+apply on $\Vh$, so existence and uniqueness follow immediately.
+
+\begin{proposition}[Galerkin orthogonality]
+\label{prop:galerkin-orthogonality}
+Let $u$ and $u_h$ solve \cref{eq:weak-problem,eq:discrete-problem}. Then
+\begin{equation}
+  a(u-u_h,v_h)=0
+  \qquad\text{for every }v_h\in\Vh.
+  \label{eq:galerkin-orthogonality}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Restrict \cref{eq:weak-problem} to test functions in $\Vh$ and subtract
+\cref{eq:discrete-problem}.
+\end{proof}
+
+If $\{\phi_i\}_{i=1}^N$ is the nodal basis of $\Vh$ and
+$u_h=\sum_{j=1}^N U_j\phi_j$, then \cref{eq:discrete-problem} becomes
+\begin{equation}
+  \bm K\bm U=\bm b,
+  \qquad
+  K_{ij}=a(\phi_j,\phi_i),
+  \quad
+  b_i=F(\phi_i).
+  \label{eq:linear-system}
+\end{equation}
+The matrix $\bm K$ is symmetric positive definite, permitting a conjugate
+gradient solve with an appropriate preconditioner.
+
+\begin{remark}[Energy projection]
+The consistency identity in \cref{eq:galerkin-orthogonality} shows that $u_h$
+is the projection of $u$ onto $\Vh$ in the energy inner product. This geometric
+interpretation is the starting point of the quasi-optimality estimate.
+\end{remark}
+
+% DEMO: Insert a displayed formula here, for example an energy projection identity.

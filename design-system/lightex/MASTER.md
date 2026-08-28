@@ -1,80 +1,72 @@
 # LighTex Design System
 
-This file is the visual source of truth for the native macOS application.
+This file is the visual source of truth for the macOS and Linux desktop application.
 
 ## Product character
 
-- Quiet, precise, compact, native, professional.
+- Quiet, precise, compact, platform-aware, professional.
 - Document-first: source and PDF receive the most space and the least decoration.
 - Light appearance only in the current product phase.
-- Native macOS interaction and focus behavior take precedence over custom styling.
+- Native window behavior, dialogs, keyboard conventions, and focus semantics take precedence over decorative consistency.
 
 ## Typography
 
-- Application UI: macOS system font (SF Pro), Regular / Medium / Semibold.
-- Welcome title: 28 pt Semibold.
-- Standard UI: 12–14 pt.
-- Secondary and status text: 11–12 pt.
-- Source editor: SF Mono when available, platform monospace fallback, 13.5 pt default, compact fixed 18 pt line height at the default size.
-- Do not bundle web fonts.
+- macOS UI: system font; Linux UI: Inter/Segoe UI fallback stack.
+- Welcome title: 28 px Semibold.
+- Standard UI: 12–14 px.
+- Secondary and status text: 11–12 px.
+- Source editor: SF Mono on macOS, JetBrains Mono/Liberation Mono fallback on Linux, 13.5 px default.
+- Do not download fonts at runtime.
 
 ## Color and surfaces
 
-- Main canvas and editor: system white.
-- Sidebar: `NSColor.controlBackgroundColor`.
-- Secondary bars: `NSColor.windowBackgroundColor`.
-- PDF surround: `NSColor.underPageBackgroundColor`.
-- Dividers: `NSColor.separatorColor` at restrained opacity.
-- Selection and primary interaction: current macOS system accent color.
-- Errors and warnings: semantic system red/orange, always paired with an icon and text.
+- Main canvas and editor: white.
+- Sidebar and window surfaces: neutral platform-aware grays.
+- PDF surround: darker neutral under-page surface.
+- Dividers: restrained one-pixel separators.
+- Selection and primary interaction: one accent blue.
+- Errors and warnings: semantic red/orange, always paired with icon and text.
 - No brand gradient or fixed purple/cyan palette.
 
 ## Layout
 
-- 4 / 8 pt spacing rhythm; dense editor controls use 5–12 pt gaps and padding.
-- Toolbar and tab rows: 34 pt.
-- Status bar: 24 pt.
-- Sidebar: 185–330 pt.
-- Editor minimum: 360 pt.
-- PDF minimum: 320 pt; user can hide it when width is constrained.
-- Panels are separated by draggable native split dividers, not cards.
-- Source text uses a compact 6 pt horizontal and 8 pt vertical inset from its gutter, matching dense web-based code editors.
-- Empty and populated source lines share one fixed TextKit line height and baseline; syntax highlighting never changes typography while editing.
+- 4 / 8 px spacing rhythm; dense editor controls use 5–12 px gaps and padding.
+- Toolbar and tab rows: 34 px; status bar: 24 px.
+- Sidebar: 185–330 px; editor minimum: 360 px; PDF minimum: 320 px.
+- Panels use draggable split dividers rather than cards.
+- Source and PDF headers begin on the same horizontal line.
+- Insert Shelf belongs only to the source column and opens as a compact bottom drawer.
 
 ## Components
 
-- Use standard SwiftUI/AppKit controls and SF Symbols.
-- Small control radius: native 6–8 pt behavior.
-- Settings use a 420 pt trailing overlay with native Form sections and a system segmented control.
-- The project hub toolbar exposes only Settings; project creation and opening remain in the main content.
-- The Templates library is a full in-window hub view with no search while the catalog is small. `Yours` always appears first, followed by bundled LighTex templates in an adaptive grid.
-- An empty `Yours` section explains personal templates and provides a visible Create Template action; personal templates are independent copies and never modify their source projects.
-- First-run TeX setup is a required, content-area onboarding flow with Minimal, Standard, and Full runtime choices.
+- Use semantic HTML controls, Tauri-native dialogs/menus, Lucide icons, and visible focus rings.
+- Small control radius: 6–8 px.
+- Settings use a 420 px trailing overlay and a segmented tab control.
+- Templates are a dedicated in-window view: `Yours` first, followed by bundled templates with real first-page previews.
+- First-run TeX setup is required when no system or managed provider is configured.
 - Hover backgrounds may use black at roughly 4–5% opacity without movement or scaling.
-- Active editor tab: white surface and medium-weight title, without an accent baseline.
-- The sidebar starts directly with the file tree and uses a lower resizable Outline pane for document headings.
-- Recompile is the primary toolbar action; Auto Compile is a secondary toggle beside it.
-- Problems panel stays collapsed until requested or a build fails.
-- Clearing Recent Projects always requires confirmation and states that project folders and files remain on the Mac.
+- Recompile is primary; Auto Compile is a secondary toggle beside it.
+- Problems stays collapsed until requested or a build fails.
+- Clearing Recent Projects requires confirmation and states that local files remain untouched.
 
-## Motion
+## Motion and performance
 
-- No decorative entrance animation.
-- No spring, scale, glow, or layout-shifting hover effects.
-- Native control state transitions only; the UI remains fully useful with reduced motion.
-- The Settings overlay uses a 220 ms trailing move plus opacity transition and becomes immediate with Reduce Motion.
+- No decorative entrance animation, spring, scale, glow, or layout-shifting hover effects.
+- Respect `prefers-reduced-motion`.
+- Settings may use a 220 ms trailing move plus opacity transition.
+- PDF pages render lazily near the continuous-scroll viewport.
+- Searchable catalogs defer filtering and preserve stable list keys.
 
 ## Accessibility
 
-- Preserve native focus rings and keyboard navigation.
-- Icon-only buttons need an accessibility label and tooltip.
-- Never communicate build state using color alone; include symbol and text.
-- Normal text should meet 4.5:1 contrast on its surface.
-- Truncated file paths provide their full value through help text where practical.
+- Preserve platform focus rings and full keyboard navigation.
+- Icon-only buttons need an accessible label and tooltip.
+- Never communicate build state using color alone.
+- Normal text should meet 4.5:1 contrast.
+- Controls should keep at least a 24 × 24 px target in dense desktop layouts.
 
 ## Anti-patterns
 
 - No card around every panel.
 - No giant rounded welcome actions.
-- No web dashboard chrome, fake statistics, decorative badges, or marketing copy.
-- No emoji icons, gradients, excessive translucency, blur behind source/PDF, or arbitrary shadows.
+- No web-dashboard chrome, fake statistics, decorative badges, emoji icons, gradients, excessive translucency, or arbitrary shadows.

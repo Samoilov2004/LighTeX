@@ -1,0 +1,140 @@
+name: Build LighTex Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable release version
+        required: true
+        default: "1.1.0"
+      publish:
+        description: Publish the GitHub Release after every package passes
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            name: macOS-Apple-Silicon
+            target: aarch64-apple-darwin
+            bundle: app
+            asset: LighTex-macOS-Apple-Silicon.dmg
+          - runner: macos-15-intel
+            name: macOS-Intel
+            target: x86_64-apple-darwin
+            bundle: app
+            asset: LighTex-macOS-Intel.dmg
+          - runner: ubuntu-22.04
+            name: Linux-amd64
+            target: x86_64-unknown-linux-gnu
+            bundle: deb
+            asset: LighTex-Linux-amd64.deb
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev wget
+      - run: pnpm install --frozen-lockfile
+      - name: Validate requested version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]
+      - name: Set package version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node -e 'const fs=require("fs"); const version=process.env.RELEASE_VERSION; for (const p of ["package.json","apps/desktop/package.json","apps/desktop/src-tauri/tauri.conf.json"]) { const j=JSON.parse(fs.readFileSync(p)); j.version=version; fs.writeFileSync(p, JSON.stringify(j,null,2)+"\n"); } const p="Cargo.toml"; const text=fs.readFileSync(p,"utf8"); fs.writeFileSync(p,text.replace(/(\[workspace\.package\]\s*\nversion = ")[^"]+"/,(_,start)=>start+version+"\""));'
+      - name: Run tests
+        run: |
+          cargo test --workspace --target "${{ matrix.target }}"
+          pnpm --dir apps/desktop test
+          pnpm --dir apps/desktop build:web
+      - name: Build native package
+        run: pnpm --dir apps/desktop tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}"
+      - name: Prepare DMG tooling
+        if: runner.os == 'macOS'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild-venv"
+          "$RUNNER_TEMP/dmgbuild-venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            -r scripts/release-requirements.txt
+      - name: Collect macOS package
+        if: runner.os == 'macOS'
+        env:
+          DMGBUILD_EXECUTABLE: ${{ runner.temp }}/dmgbuild-venv/bin/dmgbuild
+        run: |
+          APP="target/${{ matrix.target }}/release/bundle/macos/LighTex.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          mkdir -p "$RUNNER_TEMP/packages"
+          ./scripts/create-dmg.sh "$APP" "$RUNNER_TEMP/packages/${{ matrix.asset }}" LighTex
+      - name: Collect Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          DEB="$(find "target/${{ matrix.target }}/release/bundle/deb" -type f -name '*.deb' -print -quit)"
+          test -n "$DEB"
+          mkdir -p "$RUNNER_TEMP/packages"
+          cp "$DEB" "$RUNNER_TEMP/packages/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ runner.temp }}/packages/${{ matrix.asset }}
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-*"
+          path: packages
+          merge-multiple: true
+      - name: Write checksums
+        run: sha256sum packages/* > packages/SHA256SUMS.txt
+      - name: Publish stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          TAG="v${RELEASE_VERSION}"
+          NOTES="LighTex ${RELEASE_VERSION} is the cross-platform Tauri release for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. It includes the local LaTeX editor, continuous PDF preview, SyncTeX, project templates, searchable symbol insertion, and managed TeX runtimes. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "${{ github.repository }}" --latest --title "LighTex ${RELEASE_VERSION}" --notes "$NOTES"
+          else
+            gh release create "$TAG" --repo "${{ github.repository }}" --target "${{ github.sha }}" --latest --title "LighTex ${RELEASE_VERSION}" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" packages/* --repo "${{ github.repository }}" --clobber
