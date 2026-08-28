@@ -59,6 +59,6 @@ mod tests {
     #[test]
     fn compares_stable_versions_numerically() {
         assert!(version_parts("1.10.0").unwrap() > version_parts("1.9.9").unwrap());
-        assert_eq!(version_parts("v1.1.0-beta.1").unwrap(), (1, 1, 0));
+        assert_eq!(version_parts("v1.1.1-beta.1").unwrap(), (1, 1, 1));
     }
 }

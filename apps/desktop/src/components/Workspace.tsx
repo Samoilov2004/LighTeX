@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CircleAlert, FileText, Folder, ListTree, PanelLeft, PanelRight, Play, Search, Settings, Sigma, Square } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CircleAlert, FileText, Folder, PanelLeft, PanelRight, Play, Search, Settings, Sigma, Square } from "lucide-react";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, isDesktop } from "../api";
 import { useAppStore, type SidebarMode } from "../store";
+import { BackToProjectsControl } from "./BackToProjectsControl";
+import { EditorQuickControls } from "./EditorQuickControls";
 import { EditorTabs } from "./EditorTabs";
 import { FileTree } from "./FileTree";
 import { InsertShelf } from "./InsertShelf";
-import { OutlinePanel } from "./OutlinePanel";
+import { OutlineDrawer } from "./OutlineDrawer";
 import { PdfPreview } from "./PdfPreview";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { SearchPanel } from "./SearchPanel";
-import { SourceEditor } from "./SourceEditor";
+import { SourceEditor, type SourceEditorHandle } from "./SourceEditor";
 import { WindowDragRegion } from "./WindowDragRegion";
 import type { SyncTeXPdfTarget } from "../types";
 import { useModalFocus } from "../useModalFocus";
@@ -22,9 +24,11 @@ export function Workspace() {
   const [sidebarWidth, setSidebarWidth] = useState(230);
   const [editorFraction, setEditorFraction] = useState(0.51);
   const [pdfTarget, setPdfTarget] = useState<SyncTeXPdfTarget | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<string | null>(null);
   const [nameRequest, setNameRequest] = useState<{ kind: "file" | "folder" | "rename"; parent: string; path?: string; initial: string } | null>(null);
   const uploadDialog = useModalFocus<HTMLElement>(() => setUploadTarget(null), uploadTarget !== null);
+  const sourceEditorRef = useRef<SourceEditorHandle>(null);
   const selectedDocument = state.selectedPath ? state.documents[state.selectedPath] : null;
   const syncExecutable = state.activeToolchain.synctex?.path;
 
@@ -154,7 +158,7 @@ export function Workspace() {
   return (
     <main className="workspace">
       <header className="project-toolbar">
-        <button className="toolbar-button project-back-control" onClick={() => void state.leaveProject()} aria-label="Back to Projects" title="Back to Projects"><ArrowLeft size={16} /><span>Projects</span></button>
+        <BackToProjectsControl onBack={() => void state.leaveProject()} />
         <button className="icon-button" onClick={() => useAppStore.setState({ sidebarVisible: !state.sidebarVisible })} aria-label="Toggle project sidebar" aria-pressed={state.sidebarVisible} title="Project sidebar"><PanelLeft size={16} /></button>
         <WindowDragRegion />
         <div className="project-toolbar-group" role="group" aria-label="Editor panels">
@@ -176,20 +180,27 @@ export function Workspace() {
             <div className="sidebar-mode-tabs" role="tablist" aria-label="Project navigation">
               <SidebarTab mode="files" current={state.sidebarMode} icon={<Folder size={14} />} label="Files" />
               <SidebarTab mode="search" current={state.sidebarMode} icon={<Search size={14} />} label="Search" />
-              <SidebarTab mode="outline" current={state.sidebarMode} icon={<ListTree size={14} />} label="Outline" />
             </div>
-            <div className="sidebar-content">
+            <div className="sidebar-primary-content">
               {state.sidebarMode === "files" && <FileTree entries={state.entries} selectedPath={state.selectedPath} mainDocument={state.mainDocument} onOpen={(path) => void state.openDocument(path)} onCreateFile={createFile} onCreateFolder={createFolder} onUpload={upload} onRename={rename} onDuplicate={duplicate} onTrash={trash} onMove={move} onReveal={(path) => { if (state.project) void revealItemInDir(`${state.project.rootPath}/${path}`); }} onSetMain={(path) => void state.setMainDocument(path)} />}
               {state.sidebarMode === "search" && <SearchPanel />}
-              {state.sidebarMode === "outline" && <OutlinePanel />}
             </div>
+            <OutlineDrawer expanded={state.outlineExpanded} height={state.outlineHeight} onCommit={state.setOutlineDrawer} />
           </aside>
           <ResizeDivider axis="x" onMove={(delta) => setSidebarWidth((width) => Math.max(185, Math.min(330, width + delta)))} />
         </>}
         <div className="document-area">
           <div className="editor-pdf-split" style={editorStyle}>
             <div className="source-column">
-              <EditorTabs tabs={state.tabs} selectedPath={state.selectedPath} documents={state.documents} onSelect={state.selectDocument} onClose={(path) => void state.closeDocument(path)} onReorder={state.reorderTabs} onMove={state.moveTab} onFileDrop={(path) => void state.openDocument(path)} />
+              <div className="source-header">
+                <EditorTabs tabs={state.tabs} selectedPath={state.selectedPath} documents={state.documents} onSelect={state.selectDocument} onClose={(path) => void state.closeDocument(path)} onReorder={state.reorderTabs} onMove={state.moveTab} onFileDrop={(path) => void state.openDocument(path)} />
+                <EditorQuickControls
+                  canUndo={canUndo}
+                  fontSize={state.config.editorFontSize}
+                  onUndo={() => sourceEditorRef.current?.undo()}
+                  onFontSizeChange={(editorFontSize) => void state.updateConfig({ editorFontSize })}
+                />
+              </div>
               {selectedDocument && selectedDocument.externalChange !== "none" && <div className="conflict-banner" role="alert">
                 <span>{selectedDocument.externalChange === "deleted" ? `${selectedDocument.relativePath} was deleted outside LighTex.` : `${selectedDocument.relativePath} changed outside LighTex.`}</span>
                 {selectedDocument.externalChange === "modified" && <button onClick={() => state.resolveConflict(selectedDocument.relativePath, "reload")}>Reload</button>}
@@ -198,7 +209,7 @@ export function Workspace() {
                 {selectedDocument.externalChange === "deleted" && <button onClick={() => void state.closeDocument(selectedDocument.relativePath)}>Close</button>}
               </div>}
               <section className="source-pane" aria-label="Source editor">
-                {selectedDocument ? <SourceEditor key={selectedDocument.relativePath} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onChange={(text) => state.updateText(selectedDocument.relativePath, text)} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
+                {selectedDocument ? <SourceEditor ref={sourceEditorRef} key={selectedDocument.relativePath} historyKey={`${state.project?.id ?? "project"}:${selectedDocument.relativePath}`} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onUndoAvailabilityChange={setCanUndo} onChange={(text) => state.updateText(selectedDocument.relativePath, text)} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
               </section>
               {state.insertShelfOpen && <InsertShelf onClose={() => useAppStore.setState({ insertShelfOpen: false })} />}
             </div>

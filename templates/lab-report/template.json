@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "lab-report",
+  "name": "Laboratory Report",
+  "description": "A multi-file experimental report with methods, results, tables, and conclusions.",
+  "category": "education",
+  "engine": "xelatex",
+  "entry": "main.tex",
+  "preview": "preview.png",
+  "documentClass": "article",
+  "tags": ["laboratory", "report", "experiment", "multi-file"]
+}

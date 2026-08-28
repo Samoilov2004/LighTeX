@@ -19,7 +19,7 @@ import { defaultConfig } from "./types";
 import { findExistingProjectPdf } from "./projectFiles";
 
 type AppPhase = "booting" | "setup" | "hub" | "project";
-export type SidebarMode = "files" | "search" | "outline";
+export type SidebarMode = "files" | "search";
 export type BuildState = "idle" | "building" | "success" | "failure";
 export type CloseDecision = "save" | "discard" | "cancel";
 export interface CloseRequest {
@@ -73,6 +73,8 @@ interface AppState {
   insertShelfOpen: boolean;
   problemsOpen: boolean;
   outline: OutlineItem[];
+  outlineExpanded: boolean;
+  outlineHeight: number;
   completion: ProjectCompletionIndex;
   buildState: BuildState;
   buildResult: BuildResult | null;
@@ -103,6 +105,7 @@ interface AppState {
   remapEntryPaths(oldPath: string, newPath: string): void;
   updateConfig(patch: Partial<AppConfigV1>): Promise<void>;
   setSidebarMode(mode: SidebarMode): void;
+  setOutlineDrawer(expanded: boolean, height?: number): void;
   setError(error: string | null): void;
   decideClose(decision: CloseDecision): void;
   prepareApplicationClose(): Promise<boolean>;
@@ -132,6 +135,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   insertShelfOpen: false,
   problemsOpen: false,
   outline: [],
+  outlineExpanded: true,
+  outlineHeight: 180,
   completion: emptyCompletion,
   buildState: "idle",
   buildResult: null,
@@ -285,6 +290,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabs: [],
         selectedPath: null,
         mainDocument,
+        outlineExpanded: session?.outlineExpanded ?? true,
+        outlineHeight: Math.max(112, session?.outlineHeight ?? 180),
         buildResult: null,
         pdfBase64: null,
         buildState: "idle",
@@ -599,6 +606,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSidebarMode(sidebarMode) { set({ sidebarMode }); },
+  setOutlineDrawer(outlineExpanded, height = get().outlineHeight) {
+    set({ outlineExpanded, outlineHeight: Math.max(112, Math.round(height)) });
+    void persistSession();
+  },
   setError(error) { set({ error }); },
   decideClose(decision) {
     const resolver = closeResolver;
@@ -641,11 +652,13 @@ async function persistSession() {
   const state = useAppStore.getState();
   if (!state.project || !isDesktop()) return;
   await api.saveSession({
-    schemaVersion: 1,
+    schemaVersion: 2,
     projectPath: state.project.rootPath,
     mainDocument: state.mainDocument,
     openDocuments: state.tabs,
     selectedDocument: state.selectedPath,
+    outlineExpanded: state.outlineExpanded,
+    outlineHeight: Math.round(state.outlineHeight),
   });
 }
 

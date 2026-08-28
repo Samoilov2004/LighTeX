@@ -114,29 +114,101 @@ pub fn create_project(parent: &Path, name: &str) -> CoreResult<PathBuf> {
 pub fn create_project_from_template(
     parent: &Path,
     name: &str,
+    templates_root: &Path,
     template: &str,
 ) -> CoreResult<PathBuf> {
-    let root = create_project(parent, name)?;
-    let source = match template {
-        "article" => {
-            "\\documentclass[11pt]{article}\n\\usepackage[T1]{fontenc}\n\\usepackage{amsmath,amssymb}\n\\usepackage{graphicx}\n\\usepackage{hyperref}\n\\title{Article Title}\n\\author{Your Name}\n\\date{\\today}\n\\begin{document}\n\\maketitle\n\\begin{abstract}\nA concise summary of the work.\n\\end{abstract}\n\\section{Introduction}\nStart writing here.\n\\end{document}\n"
-        }
-        "mathematics" => {
-            "\\documentclass[11pt]{article}\n\\usepackage[T1]{fontenc}\n\\usepackage{amsmath,amssymb,amsthm,mathtools}\n\\newtheorem{theorem}{Theorem}\n\\newtheorem{definition}{Definition}\n\\title{Mathematical Notes}\n\\author{Your Name}\n\\begin{document}\n\\maketitle\n\\section{Preliminaries}\n\\begin{definition}\nA useful definition.\n\\end{definition}\n\\begin{theorem}\nA significant result.\n\\end{theorem}\n\\begin{proof}\nWrite the proof here.\n\\end{proof}\n\\end{document}\n"
-        }
-        "textbook" => {
-            "\\documentclass[11pt,oneside]{book}\n\\usepackage[T1]{fontenc}\n\\usepackage{amsmath,amssymb,amsthm,graphicx,booktabs}\n\\title{Textbook Title}\n\\author{Your Name}\n\\begin{document}\n\\frontmatter\n\\maketitle\n\\tableofcontents\n\\mainmatter\n\\chapter{Foundations}\n\\section{First Ideas}\nStart writing here.\n\\end{document}\n"
-        }
-        "presentation" => {
-            "\\documentclass{beamer}\n\\usetheme{default}\n\\title{Presentation Title}\n\\author{Your Name}\n\\begin{document}\n\\begin{frame}\n  \\titlepage\n\\end{frame}\n\\begin{frame}{Main Idea}\n  \\begin{itemize}\n    \\item First point\n    \\item Second point\n  \\end{itemize}\n\\end{frame}\n\\end{document}\n"
-        }
-        _ => return Ok(root),
-    };
-    fs::write(root.join("main.tex"), source)?;
-    if matches!(template, "article" | "textbook") {
-        fs::create_dir_all(root.join("figures"))?;
+    let template = validated_name(template)?;
+    let templates_root = canonical_directory(templates_root)?;
+    let source_candidate = templates_root.join(template);
+    if !source_candidate.is_dir() {
+        return Err(CoreError::Message(format!(
+            "The bundled template does not exist: {template}"
+        )));
     }
-    Ok(root)
+    let source = canonical_directory(&source_candidate)?;
+    if !source.starts_with(&templates_root) {
+        return Err(CoreError::UnsafePath(source));
+    }
+
+    let manifest_path = source.join("template.json");
+    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    let schema = manifest
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64);
+    let manifest_id = manifest.get("id").and_then(serde_json::Value::as_str);
+    let entry = manifest
+        .get("entry")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| CoreError::InvalidManifest("template entry is missing".into()))?;
+    if schema != Some(1) || manifest_id != Some(template) {
+        return Err(CoreError::InvalidManifest(format!(
+            "template.json does not describe {template}"
+        )));
+    }
+    let entry_path = fs::canonicalize(source.join(entry))?;
+    if !entry_path.starts_with(&source) || !entry_path.is_file() {
+        return Err(CoreError::InvalidManifest(format!(
+            "template entry is outside the template: {entry}"
+        )));
+    }
+
+    let name = validated_name(name)?;
+    let parent = canonical_directory(parent)?;
+    let destination = parent.join(name);
+    if destination.exists() {
+        return Err(CoreError::DestinationExists(destination));
+    }
+    fs::create_dir(&destination)?;
+    if let Err(error) = copy_bundled_template(&source, &destination) {
+        let _ = fs::remove_dir_all(&destination);
+        return Err(error);
+    }
+    Ok(destination)
+}
+
+fn copy_bundled_template(source: &Path, destination: &Path) -> CoreResult<()> {
+    fn visit(root: &Path, directory: &Path, destination: &Path) -> CoreResult<()> {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let relative = entry.path().strip_prefix(root).unwrap().to_path_buf();
+            if excluded_bundled_template_path(&relative) {
+                continue;
+            }
+            let target = destination.join(&relative);
+            if file_type.is_dir() {
+                fs::create_dir_all(&target)?;
+                visit(root, &entry.path(), destination)?;
+            } else if file_type.is_file() {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(())
+    }
+    visit(source, source, destination)
+}
+
+fn excluded_bundled_template_path(relative: &Path) -> bool {
+    if relative
+        .components()
+        .any(|component| component.as_os_str() == "build")
+    {
+        return true;
+    }
+    let name = relative.file_name().and_then(|value| value.to_str());
+    if name == Some(".DS_Store") {
+        return true;
+    }
+    relative
+        .parent()
+        .is_some_and(|parent| parent.as_os_str().is_empty())
+        && matches!(name, Some("template.json" | "preview.png" | "main.pdf"))
 }
 
 pub fn create_file(root: &Path, parent: &str, name: &str) -> CoreResult<String> {
@@ -404,5 +476,69 @@ mod tests {
         let source = fs::read_to_string(root.join("main.tex")).unwrap();
         assert!(source.contains("\\documentclass"));
         assert!(source.contains("\\maketitle"));
+    }
+
+    #[test]
+    fn creates_project_from_bundled_template_without_generated_files() {
+        let parent = tempfile::tempdir().unwrap();
+        let templates = tempfile::tempdir().unwrap();
+        let template = templates.path().join("math-notes");
+        fs::create_dir_all(template.join("chapters")).unwrap();
+        fs::create_dir_all(template.join("build")).unwrap();
+        fs::write(
+            template.join("template.json"),
+            r#"{"schemaVersion":1,"id":"math-notes","entry":"main.tex"}"#,
+        )
+        .unwrap();
+        fs::write(template.join("main.tex"), "\\documentclass{book}").unwrap();
+        fs::write(template.join("chapters/first.tex"), "\\chapter{First}").unwrap();
+        fs::write(template.join("preview.png"), "preview").unwrap();
+        fs::write(template.join("main.pdf"), "generated").unwrap();
+        fs::write(template.join("build/main.aux"), "generated").unwrap();
+
+        let root =
+            create_project_from_template(parent.path(), "Notes", templates.path(), "math-notes")
+                .unwrap();
+
+        assert!(root.join("main.tex").is_file());
+        assert!(root.join("chapters/first.tex").is_file());
+        assert!(!root.join("template.json").exists());
+        assert!(!root.join("preview.png").exists());
+        assert!(!root.join("main.pdf").exists());
+        assert!(!root.join("build").exists());
+    }
+
+    #[test]
+    fn unknown_bundled_template_does_not_create_a_project() {
+        let parent = tempfile::tempdir().unwrap();
+        let templates = tempfile::tempdir().unwrap();
+        assert!(
+            create_project_from_template(parent.path(), "Missing", templates.path(), "old")
+                .is_err()
+        );
+        assert!(!parent.path().join("Missing").exists());
+    }
+
+    #[test]
+    fn repository_bundled_templates_are_valid_and_copyable() {
+        let parent = tempfile::tempdir().unwrap();
+        let templates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates");
+        let ids = [
+            "blank-document",
+            "homework",
+            "lab-report",
+            "math-notes",
+            "scientific-article",
+            "simple-presentation",
+        ];
+
+        for id in ids {
+            let root = create_project_from_template(parent.path(), id, &templates, id).unwrap();
+            assert!(root.join("main.tex").is_file(), "missing main.tex for {id}");
+            assert!(!root.join("template.json").exists());
+            assert!(!root.join("preview.png").exists());
+            assert!(!root.join("main.pdf").exists());
+            assert!(!root.join("build").exists());
+        }
     }
 }

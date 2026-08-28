@@ -1,15 +1,26 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, FunctionSquare, Image, List, Search, Table2, X } from "lucide-react";
-import { createTableLatex, filterSymbols, symbolCategories, type SymbolCategory } from "../insertCatalog";
+import { ChevronDown, FunctionSquare, Image, PanelsTopLeft, Search, Sigma, Table2, X } from "lucide-react";
+import { filterSymbols, symbolCategories, type SymbolCategory } from "../insertCatalog";
+import {
+  blockSnippets,
+  createStyledTableLatex,
+  figureSnippets,
+  filterMathSnippets,
+  mathSnippetCategories,
+  type LatexSnippet,
+  type MathSnippetCategory,
+} from "../insertSnippets";
 
-type Category = "symbols" | "math" | "figures" | "tables";
+type Category = "symbols" | "math" | "blocks" | "figures" | "tables";
 
 export function InsertShelf({ onClose }: { onClose(): void }) {
   const [category, setCategory] = useState<Category>("symbols");
   const [query, setQuery] = useState("");
   const [symbolCategory, setSymbolCategory] = useState<"All" | SymbolCategory>("Greek");
+  const [mathCategory, setMathCategory] = useState<MathSnippetCategory>("Popular");
   const deferredQuery = useDeferredValue(query);
   const filteredSymbols = useMemo(() => filterSymbols(deferredQuery, symbolCategory), [deferredQuery, symbolCategory]);
+  const filteredMath = useMemo(() => filterMathSnippets(mathCategory), [mathCategory]);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,7 +32,8 @@ export function InsertShelf({ onClose }: { onClose(): void }) {
       <div className="shelf-toolbar">
         <div className="shelf-tabs" role="tablist" aria-label="Insert categories">
           <ShelfTab category="symbols" current={category} set={setCategory}><FunctionSquare size={14} /><span>Symbols</span></ShelfTab>
-          <ShelfTab category="math" current={category} set={setCategory}><List size={14} /><span>Math</span></ShelfTab>
+          <ShelfTab category="math" current={category} set={setCategory}><Sigma size={14} /><span>Math</span></ShelfTab>
+          <ShelfTab category="blocks" current={category} set={setCategory}><PanelsTopLeft size={14} /><span>Blocks</span></ShelfTab>
           <ShelfTab category="figures" current={category} set={setCategory}><Image size={14} /><span>Figures</span></ShelfTab>
           <ShelfTab category="tables" current={category} set={setCategory}><Table2 size={14} /><span>Tables</span></ShelfTab>
         </div>
@@ -37,47 +49,124 @@ export function InsertShelf({ onClose }: { onClose(): void }) {
             {filteredSymbols.length > 0 ? <div className="symbol-grid">{filteredSymbols.map((item) => <InsertButton key={`${item.category}-${item.latex}`} label={item.glyph} latex={item.latex} title={`${item.name} · ${item.latex}`} command={item.latex} />)}</div> : <div className="symbol-empty"><strong>No matching symbols</strong><span>Try a name such as “arrow”, “subset”, or a command such as “\\lambda”.</span></div>}
           </div>
         </div>}
-        {category === "math" && <div className="snippet-grid">{mathSnippets.map(([label, latex]) => <InsertButton key={label} label={label} latex={latex} wide />)}</div>}
-        {category === "figures" && <div className="snippet-grid"><InsertButton label="Full-width figure" latex={figureSnippet("0.9")} wide /><InsertButton label="Half-width figure" latex={figureSnippet("0.48")} wide /><InsertButton label="Two side-by-side figures" latex={twoFiguresSnippet} wide /></div>}
-        {category === "tables" && <TablePicker />}
+        {category === "math" && <div className="snippet-browser">
+          <div className="snippet-category-filter" role="toolbar" aria-label="Math categories">
+            {mathSnippetCategories.map((item) => <button key={item} className={item === mathCategory ? "selected" : ""} aria-pressed={item === mathCategory} onClick={() => setMathCategory(item)}>{item}</button>)}
+          </div>
+          <div className="snippet-results"><div className="rich-snippet-grid">{filteredMath.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="math" />)}</div></div>
+        </div>}
+        {category === "blocks" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{blockSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="block" />)}</div></div>}
+        {category === "figures" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{figureSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="figure" />)}</div></div>}
+        {category === "tables" && <TableBuilder />}
       </div>
     </section>
   );
 }
 
 function ShelfTab({ category, current, set, children }: { category: Category; current: Category; set(value: Category): void; children: React.ReactNode }) {
-  return <button role="tab" aria-selected={category === current} className={category === current ? "selected" : ""} onClick={() => set(category)}>{children}</button>;
+  const label = category.charAt(0).toUpperCase() + category.slice(1);
+  return <button role="tab" aria-label={label} aria-selected={category === current} className={category === current ? "selected" : ""} onClick={() => set(category)}>{children}</button>;
 }
 
 function InsertButton({ label, latex, wide = false, title, command }: { label: string; latex: string; wide?: boolean; title?: string; command?: string }) {
-  return <button className={wide ? "snippet-button" : "symbol-button"} title={title} aria-label={title ?? `Insert ${label}`} onClick={() => insertLatex(latex)}><strong>{label}</strong>{wide && <code>{latex.split("\n")[0]}</code>}{!wide && command && <small>{command.replace(/^\\/, "")}</small>}</button>;
+  return <button className={wide ? "snippet-button" : "symbol-button"} title={title} aria-label={title ?? "Insert " + label} onClick={() => insertLatex(latex)}><strong>{label}</strong>{wide && <code>{latex.split("\n")[0]}</code>}{!wide && command && <small>{command.replace(/^\\/, "")}</small>}</button>;
 }
 
-function TablePicker() {
+function SnippetCard({ snippet, kind }: { snippet: LatexSnippet; kind: "math" | "block" | "figure" }) {
+  const className = ["insert-snippet-card", kind, snippet.tone ? "tone-" + snippet.tone : ""].filter(Boolean).join(" ");
+  return (
+    <button className={className} aria-label={"Insert " + snippet.title} title={snippet.title + " — " + snippet.description} onClick={() => insertLatex(snippet.latex)}>
+      <span className="snippet-preview" aria-hidden="true">{snippet.preview}</span>
+      <span className="snippet-copy">
+        <strong>{snippet.title}</strong>
+        <small>{snippet.description}</small>
+        {snippet.requires && <span className="snippet-requirement">{snippet.requires}</span>}
+      </span>
+    </button>
+  );
+}
+
+function TableBuilder() {
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(3);
-  return <div className="table-picker">
-    <div className="table-picker-copy"><strong>{rows} × {columns} table</strong><span>Choose up to eight rows and columns.</span><button className="primary-button compact" onClick={() => insertLatex(createTableLatex(rows, columns))}>Insert Table</button></div>
-    <div className="table-size-grid" role="grid" aria-label="Table size">
-      {Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, column) => {
-        const selected = row < rows && column < columns;
-        return <button key={`${row}-${column}`} role="gridcell" className={selected ? "selected" : ""} aria-label={`${row + 1} rows by ${column + 1} columns`} aria-selected={selected} onPointerEnter={() => { setRows(row + 1); setColumns(column + 1); }} onFocus={() => { setRows(row + 1); setColumns(column + 1); }} onClick={() => insertLatex(createTableLatex(row + 1, column + 1))} />;
-      }))}
+  const [alignment, setAlignment] = useState<"left" | "center" | "right">("center");
+  const [headerRow, setHeaderRow] = useState(true);
+  const [gridLines, setGridLines] = useState(false);
+  const sizes = Array.from({ length: 8 }, (_, index) => index + 1);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const selectSize = (nextRows: number, nextColumns: number, moveFocus = false) => {
+    const clampedRows = Math.max(1, Math.min(8, nextRows));
+    const clampedColumns = Math.max(1, Math.min(8, nextColumns));
+    setRows(clampedRows);
+    setColumns(clampedColumns);
+    if (moveFocus) {
+      gridRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-row="${clampedRows}"][data-column="${clampedColumns}"]`)
+        ?.focus();
+    }
+  };
+
+  const handleCellKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      insertTable(rows, columns);
+      return;
+    }
+    const movement = {
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    }[event.key];
+    if (!movement) return;
+    event.preventDefault();
+    selectSize(rows + movement[0], columns + movement[1], true);
+  };
+
+  const insertTable = (selectedRows: number, selectedColumns: number) => {
+    selectSize(selectedRows, selectedColumns);
+    insertLatex(createStyledTableLatex(selectedRows, selectedColumns, { alignment, headerRow, gridLines }));
+  };
+
+  return (
+    <div className="table-builder">
+      <div className="table-builder-settings" aria-label="Table settings">
+        <div className="table-builder-heading"><strong>Table style</strong><span>Applied when you choose a size</span></div>
+        <div className="table-builder-controls">
+          <label><span>Align</span><select value={alignment} onChange={(event) => setAlignment(event.target.value as "left" | "center" | "right")}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          <label className="table-option"><input type="checkbox" checked={headerRow} onChange={(event) => setHeaderRow(event.target.checked)} /><span>Header</span></label>
+          <label className="table-option"><input type="checkbox" checked={gridLines} onChange={(event) => setGridLines(event.target.checked)} /><span>Grid lines</span></label>
+        </div>
+      </div>
+      <div className="table-size-panel">
+        <div className="table-size-heading"><strong>{rows} × {columns}</strong><span>Click a cell to insert</span></div>
+        <div ref={gridRef} className="table-size-grid" role="grid" aria-label="Table size" aria-rowcount={8} aria-colcount={8}>
+          {sizes.map((row) => (
+            <div className="table-size-row" role="row" key={row}>
+              {sizes.map((column) => (
+                <button
+                  type="button"
+                  role="gridcell"
+                  key={column}
+                  data-row={row}
+                  data-column={column}
+                  className={row <= rows && column <= columns ? "table-size-cell highlighted" : "table-size-cell"}
+                  aria-label={`${row} rows by ${column} columns`}
+                  aria-selected={row === rows && column === columns}
+                  tabIndex={row === rows && column === columns ? 0 : -1}
+                  onPointerEnter={() => selectSize(row, column)}
+                  onFocus={() => selectSize(row, column)}
+                  onKeyDown={handleCellKeyDown}
+                  onClick={() => insertTable(row, column)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
-  </div>;
+  );
 }
 
 const insertLatex = (text: string) => window.dispatchEvent(new CustomEvent("lightex:insert", { detail: { text } }));
-
-const figureSnippet = (width: string) => `\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=${width}\\textwidth]{image.pdf}\n  \\caption{Caption}\n  \\label{fig:example}\n\\end{figure}`;
-
-const twoFiguresSnippet = "\\begin{figure}[ht]\n  \\centering\n  \\begin{minipage}{0.48\\textwidth}\n    \\includegraphics[width=\\linewidth]{first.pdf}\n    \\caption{First caption}\n  \\end{minipage}\\hfill\n  \\begin{minipage}{0.48\\textwidth}\n    \\includegraphics[width=\\linewidth]{second.pdf}\n    \\caption{Second caption}\n  \\end{minipage}\n\\end{figure}";
-
-const mathSnippets: Array<[string, string]> = [
-  ["Inline math", "$x$"],
-  ["Display equation", "\\begin{equation}\n  E = mc^2\n\\end{equation}"],
-  ["Aligned equations", "\\begin{align}\n  a &= b + c \\\\\n  d &= e + f\n\\end{align}"],
-  ["Cases", "$f(x) = \\begin{cases}\n  x^2, & x \\ge 0, \\\\\n  -x, & x < 0.\n\\end{cases}$"],
-  ["Matrix", "$\\begin{pmatrix}\n  a & b \\\\\n  c & d\n\\end{pmatrix}$"],
-  ["Theorem", "\\begin{theorem}\n  Statement.\n\\end{theorem}"],
-];

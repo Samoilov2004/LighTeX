@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -21,6 +21,10 @@ export function EditorTabs(props: EditorTabsProps) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const overflowRef = useRef<HTMLDivElement>(null);
+  const overflowButtonRef = useRef<HTMLButtonElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const overflowMenuId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const dragEnd = (event: DragEndEvent) => {
     setActiveDrag(null);
@@ -37,6 +41,48 @@ export function EditorTabs(props: EditorTabsProps) {
       .find((element) => element.dataset.tabPath === props.selectedPath);
     selected?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [props.selectedPath, props.tabs.length]);
+  useEffect(() => {
+    if (props.tabs.length === 0) setOverflowOpen(false);
+  }, [props.tabs.length]);
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const focusTimer = window.setTimeout(() => {
+      const items = menuItems(overflowMenuRef.current);
+      const selected = items.find((item) => item.dataset.selected === "true");
+      (selected ?? items[0])?.focus();
+    }, 0);
+    const dismissOutside = (event: PointerEvent) => {
+      if (!overflowRef.current?.contains(event.target as Node)) setOverflowOpen(false);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOverflowOpen(false);
+      overflowButtonRef.current?.focus();
+    };
+    const dismissOnWindowBlur = () => setOverflowOpen(false);
+    document.addEventListener("pointerdown", dismissOutside, true);
+    window.addEventListener("keydown", dismissOnEscape, true);
+    window.addEventListener("blur", dismissOnWindowBlur);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("pointerdown", dismissOutside, true);
+      window.removeEventListener("keydown", dismissOnEscape, true);
+      window.removeEventListener("blur", dismissOnWindowBlur);
+    };
+  }, [overflowOpen]);
+  const navigateOverflow = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = menuItems(overflowMenuRef.current);
+    if (items.length === 0) return;
+    event.preventDefault();
+    const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? items.length - 1
+        : event.key === "ArrowDown" ? (activeIndex + 1 + items.length) % items.length
+          : (activeIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
   return (
     <DndContext
       sensors={sensors}
@@ -77,12 +123,30 @@ export function EditorTabs(props: EditorTabsProps) {
           </SortableContext>
         </div>
         {props.tabs.length > 0 && (
-          <div className="tab-overflow">
-            <button className="icon-button" onClick={() => setOverflowOpen(!overflowOpen)} aria-label="All open files" aria-expanded={overflowOpen}><ChevronDown size={14} /></button>
+          <div
+            className="tab-overflow"
+            ref={overflowRef}
+            onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverflowOpen(false); }}
+          >
+            <button
+              ref={overflowButtonRef}
+              className="icon-button"
+              onClick={() => setOverflowOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" && !overflowOpen) {
+                  event.preventDefault();
+                  setOverflowOpen(true);
+                }
+              }}
+              aria-label="All open files"
+              aria-haspopup="menu"
+              aria-controls={overflowMenuId}
+              aria-expanded={overflowOpen}
+            ><ChevronDown size={14} /></button>
             {overflowOpen && (
-              <div className="popover-menu tab-menu" role="menu">
+              <div id={overflowMenuId} ref={overflowMenuRef} className="popover-menu tab-menu" role="menu" onKeyDown={navigateOverflow}>
                 {props.tabs.map((path) => (
-                  <button key={path} role="menuitem" onClick={() => { props.onSelect(path); setOverflowOpen(false); }}>
+                  <button key={path} role="menuitem" tabIndex={path === props.selectedPath ? 0 : -1} data-selected={path === props.selectedPath} onClick={() => { props.onSelect(path); setOverflowOpen(false); }}>
                     <FileText size={14} aria-hidden="true" />
                     <span>{fileName(path)}</span>
                     {props.documents[path]?.dirty && <span className="dirty-dot" aria-label="Unsaved" />}
@@ -168,4 +232,8 @@ function TabSurface({ path, document, active, overlay = false, onSelect, onClose
 
 function fileName(path: string) {
   return path.split("/").pop() ?? path;
+}
+
+function menuItems(menu: HTMLDivElement | null) {
+  return Array.from(menu?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? []);
 }

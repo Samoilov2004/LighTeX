@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "scientific-article",
+  "name": "Scientific Article",
+  "description": "A research article with an abstract, numbered sections, tables, and BibLaTeX references.",
+  "category": "academic",
+  "engine": "xelatex",
+  "entry": "main.tex",
+  "preview": "preview.png",
+  "documentClass": "article",
+  "tags": ["research", "article", "bibliography", "academic"]
+}

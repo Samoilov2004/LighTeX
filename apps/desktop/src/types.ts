@@ -17,7 +17,7 @@ export type { ProjectCompletionIndex } from "../../../crates/lightex-core/bindin
 export type { ProjectEntry } from "../../../crates/lightex-core/bindings/ProjectEntry";
 export type { ProjectHandle } from "../../../crates/lightex-core/bindings/ProjectHandle";
 export type { ProjectId } from "../../../crates/lightex-core/bindings/ProjectId";
-export type { ProjectSessionV1 } from "../../../crates/lightex-core/bindings/ProjectSessionV1";
+export type { ProjectSessionV2 } from "../../../crates/lightex-core/bindings/ProjectSessionV2";
 export type { ReplacePreview } from "../../../crates/lightex-core/bindings/ReplacePreview";
 export type { RuntimeArchitecture } from "../../../crates/lightex-core/bindings/RuntimeArchitecture";
 export type { RuntimeAsset } from "../../../crates/lightex-core/bindings/RuntimeAsset";

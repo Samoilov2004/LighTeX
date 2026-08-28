@@ -1,0 +1,26 @@
+\section{Results}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Example pendulum measurements.}
+  \label{tab:measurements}
+  \begin{tabular}{@{}S[table-format=1.2] S[table-format=2.2] S[table-format=1.3]@{}}
+    \toprule
+    {$L$ (\unit{\meter})} & {Time for 10 periods (\unit{\second})} & {$T$ (\unit{\second})} \\
+    \midrule
+    0.40 & 12.72 & 1.272 \\
+    0.60 & 15.55 & 1.555 \\
+    0.80 & 17.95 & 1.795 \\
+    1.00 & 20.06 & 2.006 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+For $L=\qty{1.00}{\meter}$ and $T=\qty{2.006}{\second}$, the estimate is
+\[
+  g = \frac{4\pi^2(\qty{1.00}{\meter})}{(\qty{2.006}{\second})^2}
+    = \qty{9.81}{\meter\per\second\squared}.
+\]
+
+Report measured values before interpreting them. Keep units in headings and
+round calculated values to a precision justified by the measurements.

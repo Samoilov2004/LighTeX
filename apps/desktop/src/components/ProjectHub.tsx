@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, FilePlus2, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
+import { FilePlus2, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { desktopDir } from "@tauri-apps/api/path";
 import { api, isDesktop } from "../api";
 import { useAppStore } from "../store";
-import type { PersonalTemplateManifestV2, TemplateReview } from "../types";
+import type { LatexEngine, PersonalTemplateManifestV2, TemplateReview } from "../types";
 import { renderFirstPagePreview } from "../pdf";
 import { useModalFocus } from "../useModalFocus";
 import appIcon from "../assets/AppIcon128.png";
-import articlePreview from "../assets/template-previews/article.png";
-import mathematicsPreview from "../assets/template-previews/mathematics.png";
-import textbookPreview from "../assets/template-previews/textbook.png";
-import presentationPreview from "../assets/template-previews/presentation.png";
+import blankDocumentPreview from "../../../../templates/blank-document/preview.png";
+import homeworkPreview from "../../../../templates/homework/preview.png";
+import labReportPreview from "../../../../templates/lab-report/preview.png";
+import mathNotesPreview from "../../../../templates/math-notes/preview.png";
+import scientificArticlePreview from "../../../../templates/scientific-article/preview.png";
+import simplePresentationPreview from "../../../../templates/simple-presentation/preview.png";
+import { BackToProjectsControl } from "./BackToProjectsControl";
 import { WindowDragRegion } from "./WindowDragRegion";
 
 interface TemplateDefinition {
@@ -20,13 +23,16 @@ interface TemplateDefinition {
   summary: string;
   kind: string;
   preview: string;
+  engine: LatexEngine;
 }
 
 const templates: TemplateDefinition[] = [
-  { id: "article", name: "Article", summary: "Abstract, sections, figures, and references.", kind: "Paper", preview: articlePreview },
-  { id: "mathematics", name: "Mathematics", summary: "Theorems, proofs, and aligned equations.", kind: "Math", preview: mathematicsPreview },
-  { id: "textbook", name: "Textbook", summary: "Contents, chapters, exercises, and figures.", kind: "Book", preview: textbookPreview },
-  { id: "presentation", name: "Presentation", summary: "A restrained Beamer deck for technical talks.", kind: "Slides", preview: presentationPreview },
+  { id: "blank-document", name: "Blank Document", summary: "A minimal article with clean typography and generous margins.", kind: "General", preview: blankDocumentPreview, engine: "xeLaTex" },
+  { id: "homework", name: "Homework Assignment", summary: "A compact problem set with consistent problem and solution blocks.", kind: "Homework", preview: homeworkPreview, engine: "xeLaTex" },
+  { id: "lab-report", name: "Laboratory Report", summary: "A multi-file experimental report with methods, results, tables, and conclusions.", kind: "Lab", preview: labReportPreview, engine: "xeLaTex" },
+  { id: "math-notes", name: "Mathematical Notes", summary: "Chapter-based notes with definitions, theorems, proofs, problems, and solutions.", kind: "Math", preview: mathNotesPreview, engine: "xeLaTex" },
+  { id: "scientific-article", name: "Scientific Article", summary: "A research article with an abstract, numbered sections, tables, and BibLaTeX references.", kind: "Academic", preview: scientificArticlePreview, engine: "xeLaTex" },
+  { id: "simple-presentation", name: "Simple Presentation", summary: "A clean 16:9 Beamer deck with large type and a restrained color palette.", kind: "Slides", preview: simplePresentationPreview, engine: "xeLaTex" },
 ];
 
 export function ProjectHub() {
@@ -86,7 +92,7 @@ export function ProjectHub() {
   return (
     <main className="hub-view">
       <div className="hub-toolbar">
-        {screen === "templates" && <button className="icon-button project-back" onClick={() => setScreen("projects")} aria-label="Back to Projects" title="Projects"><ArrowLeft size={16} /></button>}
+        {screen === "templates" && <BackToProjectsControl onBack={() => setScreen("projects")} />}
         <WindowDragRegion />
         <button className="icon-button" onClick={() => useAppStore.setState({ settingsOpen: true })} aria-label="Open Settings" title="Settings"><Settings size={16} /></button>
       </div>
@@ -172,6 +178,8 @@ function CreateProjectDialog({ template, title, onClose, onCreated }: { template
   const submit = async () => {
     if (!name.trim() || !parent) return;
     try {
+      const bundledTemplate = templates.find((item) => item.id === template);
+      if (bundledTemplate) await useAppStore.getState().updateConfig({ latexEngine: bundledTemplate.engine });
       const path = template === "empty"
         ? await api.createProject(parent, name)
         : template.startsWith("personal:")

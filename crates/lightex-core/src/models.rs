@@ -542,3 +542,30 @@ pub struct ProjectSessionV1 {
     pub open_documents: Vec<String>,
     pub selected_document: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProjectSessionV2 {
+    pub schema_version: u8,
+    pub project_path: String,
+    pub main_document: Option<String>,
+    pub open_documents: Vec<String>,
+    pub selected_document: Option<String>,
+    pub outline_expanded: bool,
+    pub outline_height: u16,
+}
+
+impl From<ProjectSessionV1> for ProjectSessionV2 {
+    fn from(session: ProjectSessionV1) -> Self {
+        Self {
+            schema_version: 2,
+            project_path: session.project_path,
+            main_document: session.main_document,
+            open_documents: session.open_documents,
+            selected_document: session.selected_document,
+            outline_expanded: true,
+            outline_height: 180,
+        }
+    }
+}

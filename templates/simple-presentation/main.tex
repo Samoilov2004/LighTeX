@@ -1,0 +1,115 @@
+\documentclass[aspectratio=169,12pt]{beamer}
+
+\PassOptionsToPackage{warnings-off={mathtools-colon,mathtools-overbracket}}{unicode-math}
+\usepackage{mathtools}
+\usepackage{newcomputermodern}
+\usepackage{microtype}
+\usepackage{booktabs}
+
+% Presentation metadata
+\title{Your Title}
+\subtitle{A short subtitle that adds useful context}
+\author{Author Name}
+\institute{Organization}
+\date{\today}
+
+\definecolor{Ink}{HTML}{20242A}
+\definecolor{Muted}{HTML}{68707A}
+\definecolor{Accent}{HTML}{285EA8}
+\definecolor{AccentLight}{HTML}{EDF3FB}
+\definecolor{Line}{HTML}{D9DEE5}
+
+\setbeamercolor{normal text}{fg=Ink,bg=white}
+\setbeamercolor{structure}{fg=Accent}
+\setbeamercolor{frametitle}{fg=Ink,bg=white}
+\setbeamercolor{title}{fg=Ink}
+\setbeamercolor{subtitle}{fg=Muted}
+\setbeamercolor{block title}{fg=Accent,bg=AccentLight}
+\setbeamercolor{block body}{fg=Ink,bg=AccentLight}
+\setbeamercolor{footline}{fg=Muted,bg=white}
+
+\setbeamerfont{title}{size=\fontsize{50}{56},series=\bfseries}
+\setbeamerfont{subtitle}{size=\fontsize{24}{29}}
+\setbeamerfont{frametitle}{size=\fontsize{35}{41},series=\bfseries}
+\setbeamerfont{normal text}{size=\fontsize{16}{20}}
+\setbeamerfont{block title}{size=\fontsize{24}{29},series=\bfseries}
+\setbeamerfont{footline}{size=\fontsize{10}{12}}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize item}{\color{Accent}\small$\blacktriangleright$}
+\setbeamertemplate{itemize subitem}{\color{Accent}\scriptsize$\bullet$}
+\setbeamertemplate{blocks}[rounded][shadow=false]
+\setbeamertemplate{frametitle}{%
+  \vspace{5mm}
+  \insertframetitle\par
+  \vspace{1mm}
+  {\color{Line}\rule{\textwidth}{0.6pt}}
+}
+\setbeamertemplate{footline}{%
+  \leavevmode
+  \hbox{%
+    \begin{beamercolorbox}[wd=.80\paperwidth,ht=7mm,dp=2.5mm,leftskip=10mm]{footline}
+      \insertshorttitle
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.20\paperwidth,ht=7mm,dp=2.5mm,center]{footline}
+      \insertframenumber\,/\,\inserttotalframenumber
+    \end{beamercolorbox}%
+  }
+}
+\setbeamersize{text margin left=10mm,text margin right=10mm}
+
+\begin{document}
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+\begin{frame}[t]{Begin with the question}
+  The audience should leave with one central idea and know what to do with it.
+
+  \vspace{3mm}
+  \begin{itemize}
+    \item Open with the decision that matters.
+    \item Let each slide advance the answer.
+    \item Remove details that do not affect the conclusion.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[t]{One message per slide}
+  State the idea first, then support it with the evidence that matters.
+
+  \vspace{4mm}
+  \begin{block}{Example relationship}
+    \[
+      \text{impact} = \text{reach} \times \text{change per person}
+    \]
+  \end{block}
+\end{frame}
+
+\begin{frame}[t]{Make trade-offs obvious}
+  \begin{table}
+    \centering
+    \begin{tabular}{@{}lcc@{}}
+      \toprule
+      & Option A & Option B \\
+      \midrule
+      Setup effort & Low & Medium \\
+      Flexibility & Medium & High \\
+      Best for & Quick start & Long-term use \\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+\end{frame}
+
+\begin{frame}[t]{End with a next step}
+  \begin{enumerate}
+    \item Confirm the decision or open question.
+    \item Name the owner of the next action.
+    \item State when the group will review progress.
+  \end{enumerate}
+
+  \vfill
+  {\color{Accent}\bfseries Resolve the question raised at the start.}
+\end{frame}
+
+\end{document}

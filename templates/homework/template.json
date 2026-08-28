@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "homework",
+  "name": "Homework Assignment",
+  "description": "A compact problem set with consistent problem and solution blocks.",
+  "category": "education",
+  "engine": "xelatex",
+  "entry": "main.tex",
+  "preview": "preview.png",
+  "documentClass": "article",
+  "tags": ["homework", "problems", "solutions", "mathematics"]
+}

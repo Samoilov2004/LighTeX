@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -11,12 +11,12 @@ use lightex_core::{
     AppConfigV1, AppUpdateInfo, BuildRequest, BuildResult, DocumentRevision, DocumentSnapshot,
     InstalledRuntime, ManagedRuntimeRecordV2, OpenBuffer, OutlineItem, PersonalTemplateManifestV2,
     ProjectChangeEvent, ProjectCompletionIndex, ProjectEntry, ProjectHandle, ProjectId,
-    ProjectMonitor, ProjectRegistry, ProjectSessionV1, ReplacePreview, RuntimeEnvironment,
+    ProjectMonitor, ProjectRegistry, ProjectSessionV2, ReplacePreview, RuntimeEnvironment,
     RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant, SaveOutcome, SearchQuery, SearchResult,
     StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget, TemplateReview, ToolchainStatus,
 };
 use tauri::{
-    AppHandle, Emitter,
+    AppHandle, Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
 };
 
@@ -49,12 +49,12 @@ fn save_config(config: AppConfigV1) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn load_session(project_path: String) -> Result<Option<ProjectSessionV1>, String> {
+fn load_session(project_path: String) -> Result<Option<ProjectSessionV2>, String> {
     lightex_core::settings::load_session(&project_path).map_err(Into::into)
 }
 
 #[tauri::command]
-fn save_session(session: ProjectSessionV1) -> Result<(), String> {
+fn save_session(session: ProjectSessionV2) -> Result<(), String> {
     lightex_core::settings::save_session(&session).map_err(Into::into)
 }
 
@@ -93,10 +93,36 @@ fn create_project_from_template(
     parent_path: String,
     name: String,
     template: String,
+    app: AppHandle,
 ) -> Result<String, String> {
-    lightex_core::project::create_project_from_template(Path::new(&parent_path), &name, &template)
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(Into::into)
+    let templates_root = bundled_templates_root(&app)?;
+    lightex_core::project::create_project_from_template(
+        Path::new(&parent_path),
+        &name,
+        &templates_root,
+        &template,
+    )
+    .map(|path| path.to_string_lossy().into_owned())
+    .map_err(Into::into)
+}
+
+fn bundled_templates_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?
+        .join("templates");
+    if bundled.is_dir() {
+        return Ok(bundled);
+    }
+    #[cfg(debug_assertions)]
+    {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../templates");
+        if source.is_dir() {
+            return Ok(source);
+        }
+    }
+    Err("Bundled templates are missing from this LighTex installation.".into())
 }
 
 #[tauri::command(rename_all = "camelCase")]

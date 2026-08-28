@@ -1,0 +1,84 @@
+\documentclass[11pt,a4paper]{article}
+
+\PassOptionsToPackage{warnings-off={mathtools-colon,mathtools-overbracket}}{unicode-math}
+\usepackage{mathtools}
+\usepackage{newcomputermodern}
+\usepackage[a4paper,margin=27mm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{bookmark}
+
+% Report metadata
+\newcommand{\reporttitle}{Measuring Gravitational Acceleration}
+\newcommand{\coursename}{Experimental Physics}
+\newcommand{\studentname}{Student Name}
+\newcommand{\partnername}{Lab Partner}
+\newcommand{\instructorname}{Instructor Name}
+\newcommand{\labdate}{\today}
+
+\definecolor{Ink}{HTML}{20242A}
+\definecolor{Muted}{HTML}{68707A}
+\definecolor{Accent}{HTML}{285EA8}
+
+\graphicspath{{images/}}
+\sisetup{detect-all,separate-uncertainty=true}
+\setlist{nosep,leftmargin=2em}
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.25em}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=Accent,
+  urlcolor=Accent,
+  citecolor=Accent,
+  pdftitle={\reporttitle},
+  pdfauthor={\studentname}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{Muted}\reporttitle}
+\fancyhead[R]{\small\color{Muted}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\newcommand{\makelabtitle}{%
+  \begin{titlepage}
+    \centering
+    \vspace*{0.22\textheight}
+    {\large\color{Muted}\coursename\par}
+    \vspace{1.2em}
+    {\fontsize{28}{34}\selectfont\bfseries\color{Ink}\reporttitle\par}
+    \vfill
+    \begin{tabular}{@{}rl@{}}
+      \textbf{Student:} & \studentname \\
+      \textbf{Partner:} & \partnername \\
+      \textbf{Instructor:} & \instructorname \\
+      \textbf{Date:} & \labdate
+    \end{tabular}
+    \vspace*{0.12\textheight}
+  \end{titlepage}
+}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\makelabtitle
+\hypersetup{pageanchor=true}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\input{sections/01-objective-theory}
+\input{sections/02-method}
+\input{sections/03-results}
+\input{sections/04-discussion-conclusion}
+
+\end{document}

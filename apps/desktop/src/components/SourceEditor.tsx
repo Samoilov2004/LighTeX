@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { acceptCompletion, autocompletion, closeBrackets, completionKeymap, type Completion, type CompletionContext } from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyField, historyKeymap, indentWithTab, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState } from "@codemirror/state";
@@ -10,13 +10,22 @@ import type { AppConfigV1, ProjectCompletionIndex } from "../types";
 
 interface SourceEditorProps {
   path: string;
+  historyKey: string;
   value: string;
   config: AppConfigV1;
   completion: ProjectCompletionIndex;
   onChange(value: string): void;
+  onUndoAvailabilityChange?(canUndo: boolean): void;
+}
+
+export interface SourceEditorHandle {
+  undo(): boolean;
+  focus(): void;
 }
 
 const settingsCompartment = new Compartment();
+const cachedEditorStates = new Map<string, unknown>();
+const maximumCachedEditorStates = 40;
 
 const latexLanguage = StreamLanguage.define({
   token(stream) {
@@ -40,59 +49,78 @@ const latexHighlight = HighlightStyle.define([
   { tag: tags.number, color: "#005cc5" },
 ]);
 
-export function SourceEditor({ path, value, config, completion, onChange }: SourceEditorProps) {
+export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(function SourceEditor({ path, historyKey, value, config, completion, onChange, onUndoAvailabilityChange }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const applyingExternal = useRef(false);
   const onChangeRef = useRef(onChange);
   const completionRef = useRef(completion);
+  const onUndoAvailabilityChangeRef = useRef(onUndoAvailabilityChange);
   onChangeRef.current = onChange;
   completionRef.current = completion;
+  onUndoAvailabilityChangeRef.current = onUndoAvailabilityChange;
+
+  useImperativeHandle(ref, () => ({
+    undo() {
+      const editor = view.current;
+      if (!editor) return false;
+      const changed = undo(editor);
+      editor.focus();
+      return changed;
+    },
+    focus() {
+      view.current?.focus();
+    },
+  }), []);
 
   useEffect(() => {
     if (!host.current) return;
+    const extensions = [
+      latexLanguage,
+      syntaxHighlighting(latexHighlight),
+      history(),
+      highlightSpecialChars(),
+      drawSelection(),
+      dropCursor(),
+      autocompletion({ override: [(context: CompletionContext) => latexCompletions(context, completionRef.current)] }),
+      keymap.of([
+        ...completionKeymap,
+        { key: "Tab", run: acceptCompletion },
+        indentWithTab,
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...searchKeymap,
+      ]),
+      settingsCompartment.of(editorSettings(config)),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged && !applyingExternal.current) {
+          onChangeRef.current(update.state.doc.toString());
+        }
+        if (update.docChanged) onUndoAvailabilityChangeRef.current?.(undoDepth(update.state) > 0);
+      }),
+      EditorView.domEventHandlers({
+        dblclick(event, editorView) {
+          const position = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+          if (position == null) return false;
+          const line = editorView.state.doc.lineAt(position);
+          window.dispatchEvent(new CustomEvent("lightex:source-sync", {
+            detail: { path, line: line.number, column: position - line.from + 1 },
+          }));
+          return false;
+        },
+      }),
+    ];
+    const cached = cachedEditorStates.get(historyKey) as { doc?: string } | undefined;
+    const editorState = cached?.doc === value
+      ? EditorState.fromJSON(cached, { doc: value, extensions }, { history: historyField })
+      : EditorState.create({ doc: value, extensions });
     const editor = new EditorView({
       parent: host.current,
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          latexLanguage,
-          syntaxHighlighting(latexHighlight),
-          history(),
-          highlightSpecialChars(),
-          drawSelection(),
-          dropCursor(),
-          autocompletion({ override: [(context) => latexCompletions(context, completionRef.current)] }),
-          keymap.of([
-            ...completionKeymap,
-            { key: "Tab", run: acceptCompletion },
-            indentWithTab,
-            ...defaultKeymap,
-            ...historyKeymap,
-            ...searchKeymap,
-          ]),
-          settingsCompartment.of(editorSettings(config)),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged && !applyingExternal.current) {
-              onChangeRef.current(update.state.doc.toString());
-            }
-          }),
-          EditorView.domEventHandlers({
-            dblclick(event, editorView) {
-              const position = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
-              if (position == null) return false;
-              const line = editorView.state.doc.lineAt(position);
-              window.dispatchEvent(new CustomEvent("lightex:source-sync", {
-                detail: { path, line: line.number, column: position - line.from + 1 },
-              }));
-              return false;
-            },
-          }),
-        ],
-      }),
+      state: editorState,
     });
     editor.contentDOM.setAttribute("aria-label", `LaTeX source: ${path}`);
     view.current = editor;
+    onUndoAvailabilityChangeRef.current?.(undoDepth(editor.state) > 0);
     const jump = (event: Event) => {
       const detail = (event as CustomEvent<{ path: string; line?: number }>).detail;
       if (detail.path !== path || !detail.line) return;
@@ -115,10 +143,12 @@ export function SourceEditor({ path, value, config, completion, onChange }: Sour
     return () => {
       window.removeEventListener("lightex:editor-jump", jump);
       window.removeEventListener("lightex:insert", insert);
+      cacheEditorState(historyKey, editor.state.toJSON({ history: historyField }));
+      onUndoAvailabilityChangeRef.current?.(false);
       editor.destroy();
       view.current = null;
     };
-  }, [path]);
+  }, [historyKey, path]);
 
   useEffect(() => {
     const editor = view.current;
@@ -135,6 +165,14 @@ export function SourceEditor({ path, value, config, completion, onChange }: Sour
   }, [value]);
 
   return <div className="source-editor" ref={host} data-testid="source-editor" />;
+});
+
+function cacheEditorState(key: string, state: unknown) {
+  cachedEditorStates.delete(key);
+  cachedEditorStates.set(key, state);
+  if (cachedEditorStates.size <= maximumCachedEditorStates) return;
+  const oldest = cachedEditorStates.keys().next().value;
+  if (oldest) cachedEditorStates.delete(oldest);
 }
 
 function editorSettings(config: AppConfigV1) {
@@ -154,8 +192,8 @@ function editorSettings(config: AppConfigV1) {
         lineHeight: "18px",
         overflow: "auto",
       },
-      ".cm-content": { padding: "8px 6px", caretColor: "var(--text-primary)" },
-      ".cm-line": { padding: "0 6px" },
+      ".cm-content": { padding: "8px 0", caretColor: "var(--text-primary)" },
+      ".cm-line": { padding: "0 5px" },
       ".cm-gutters": {
         backgroundColor: "var(--surface-editor)",
         color: "var(--text-tertiary)",
@@ -163,7 +201,7 @@ function editorSettings(config: AppConfigV1) {
       },
       ".cm-lineNumbers .cm-gutterElement": {
         minWidth: "44px",
-        padding: "0 10px 0 4px",
+        padding: "0 7px 0 4px",
         lineHeight: "18px",
       },
       "&.cm-focused": { outline: "1px solid rgba(10, 122, 255, .65)", outlineOffset: "-1px" },

@@ -1,0 +1,113 @@
+\documentclass[11pt,a4paper]{article}
+
+\PassOptionsToPackage{warnings-off={mathtools-colon,mathtools-overbracket}}{unicode-math}
+\usepackage{mathtools}
+\usepackage{newcomputermodern}
+\usepackage[a4paper,margin=25mm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsthm}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+
+% Assignment metadata
+\newcommand{\coursename}{Course Name}
+\newcommand{\assignmentname}{Homework 1}
+\newcommand{\studentname}{Student Name}
+\newcommand{\studentid}{Student ID}
+\newcommand{\duedate}{Due Date}
+
+\definecolor{Ink}{HTML}{20242A}
+\definecolor{Muted}{HTML}{68707A}
+\definecolor{Accent}{HTML}{285EA8}
+\definecolor{AccentLight}{HTML}{F2F6FC}
+\definecolor{Line}{HTML}{D9DEE5}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=Accent,
+  urlcolor=Accent,
+  pdftitle={\assignmentname},
+  pdfauthor={\studentname}
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlist{nosep,leftmargin=2em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{Muted}\coursename}
+\fancyhead[R]{\small\color{Muted}\studentname}
+\fancyfoot[C]{\small\color{Muted}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\newcommand{\makehomeworktitle}{%
+  \begin{center}
+    {\LARGE\bfseries\color{Ink}\assignmentname\par}
+    \vspace{0.35em}
+    {\large\color{Muted}\coursename\par}
+  \end{center}
+  \vspace{1em}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}ll}
+    \textbf{Name:} \studentname & \textbf{Due:} \duedate \\
+    \textbf{Student ID:} \studentid & \\
+  \end{tabular*}
+  \vspace{0.5em}
+  \hrule
+  \vspace{1.4em}
+}
+
+\theoremstyle{definition}
+\newtheorem{problem}{Problem}
+
+\tcolorboxenvironment{problem}{
+  enhanced jigsaw,
+  breakable,
+  colback=AccentLight,
+  frame hidden,
+  borderline west={2pt}{0pt}{Accent},
+  sharp corners,
+  boxsep=0pt,
+  left=10pt,right=10pt,top=8pt,bottom=8pt,
+  before skip=12pt,after skip=10pt
+}
+
+\newenvironment{solution}[1][Solution]
+  {\begin{proof}[\textbf{#1}]}
+  {\end{proof}}
+
+\begin{document}
+
+\makehomeworktitle
+
+\begin{problem}[A short proof]
+  Prove that the sum of two even integers is even.
+\end{problem}
+
+\begin{solution}
+  Let $a=2m$ and $b=2n$ for some integers $m$ and $n$. Then
+  \[
+    a+b=2m+2n=2(m+n).
+  \]
+  Since $m+n$ is an integer, $a+b$ is even.
+\end{solution}
+
+\begin{problem}[A recurrence]
+  Let $a_1=1$ and $a_{n+1}=2a_n+1$. Find a closed formula for $a_n$ and
+  prove it by induction.
+\end{problem}
+
+\begin{solution}
+  The first values suggest $a_n=2^n-1$. The formula holds for $n=1$.
+  Assuming it holds for some $n$, we obtain
+  \[
+    a_{n+1}=2(2^n-1)+1=2^{n+1}-1.
+  \]
+  Therefore the formula holds for every positive integer $n$.
+\end{solution}
+
+\end{document}

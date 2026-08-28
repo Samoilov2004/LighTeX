@@ -1,0 +1,118 @@
+\documentclass[11pt,a4paper]{article}
+
+\PassOptionsToPackage{warnings-off={mathtools-colon,mathtools-overbracket}}{unicode-math}
+\usepackage{mathtools}
+\usepackage{newcomputermodern}
+\usepackage[a4paper,margin=26mm]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=authoryear,maxcitenames=2]{biblatex}
+\usepackage{hyperref}
+\usepackage{bookmark}
+
+\addbibresource{references.bib}
+\graphicspath{{figures/}}
+
+\definecolor{Accent}{HTML}{285EA8}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=Accent,
+  urlcolor=Accent,
+  citecolor=Accent,
+  pdftitle={A Clear and Specific Article Title},
+  pdfauthor={First Author and Second Author}
+}
+
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.2em}
+
+\newcommand{\keywords}[1]{%
+  \par\smallskip
+  \noindent\textbf{Keywords:} #1
+}
+
+\title{A Clear and Specific Article Title}
+\author{
+  First Author\\
+  \small Department, University\\
+  \small \href{mailto:first.author@example.com}{first.author@example.com}
+  \and
+  Second Author\\
+  \small Department, University
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+State the research question, method, principal result, and main implication in
+one compact paragraph. The abstract should stand on its own and should not
+introduce citations or undefined abbreviations.
+\keywords{LaTeX, scientific writing, reproducible documents}
+\end{abstract}
+
+\section{Introduction}
+
+Explain the problem, establish why it matters, and identify the gap addressed
+by the study. End the introduction with a precise objective or research
+question. Structured authoring helps separate document content from its
+presentation \parencite{lamport1994latex}.
+
+\section{Methods}
+
+Describe the data, apparatus, participants, or procedure in enough detail for
+the work to be evaluated and reproduced. Define the primary quantity before
+using it. For example, a normalized change can be written as
+\begin{equation}
+  r = \frac{x_{\mathrm{after}}-x_{\mathrm{before}}}{x_{\mathrm{before}}}.
+  \label{eq:normalized-change}
+\end{equation}
+
+State inclusion rules, uncertainty treatment, and analysis decisions here
+rather than after the results are known.
+
+\section{Results}
+
+Present observations before interpretation. Every table and figure should be
+referenced from the text and should communicate one main point.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Illustrative measurements for the article template.}
+  \label{tab:results}
+  \begin{tabular}{@{}l S[table-format=2.1] S[table-format=2.1] S[table-format=1.2]@{}}
+    \toprule
+    Group & {Before} & {After} & {Change} \\
+    \midrule
+    A & 12.4 & 15.1 & 0.22 \\
+    B & 11.8 & 13.0 & 0.10 \\
+    C & 12.1 & 12.5 & 0.03 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The illustrative values in \autoref{tab:results} show how aligned numeric
+columns make comparisons easier. Replace them with measured values and report
+sample sizes and uncertainty where appropriate.
+
+\section{Discussion}
+
+Interpret the results in relation to the research question. Distinguish what
+the evidence directly supports from plausible explanations, compare the
+result with relevant literature, and identify limitations that affect the
+conclusion.
+
+\section{Conclusion}
+
+Answer the research question directly and state the practical or theoretical
+implication. Do not introduce new evidence in the conclusion.
+
+\printbibliography
+
+\end{document}

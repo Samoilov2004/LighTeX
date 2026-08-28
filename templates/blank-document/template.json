@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "blank-document",
+  "name": "Blank Document",
+  "description": "A minimal article with clean typography and generous margins.",
+  "category": "general",
+  "engine": "xelatex",
+  "entry": "main.tex",
+  "preview": "preview.png",
+  "documentClass": "article",
+  "tags": ["minimal", "article", "writing"]
+}

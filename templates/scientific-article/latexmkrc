@@ -1,0 +1,5 @@
+$pdf_mode = 5; # XeLaTeX
+$out_dir = 'build';
+$interaction = 'nonstopmode';
+$halt_on_error = 1;
+$synctex = 1;

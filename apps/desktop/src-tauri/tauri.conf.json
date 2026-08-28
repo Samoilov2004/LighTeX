@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LighTex",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "identifier": "app.lightex.editor",
   "build": {
     "beforeDevCommand": "pnpm dev:web",
@@ -35,6 +35,9 @@
       "icons/icon.png",
       "../../../Resources/AppIcon.icns"
     ],
+    "resources": {
+      "../../../templates/": "templates/"
+    },
     "category": "DeveloperTool",
     "shortDescription": "A focused cross-platform LaTeX editor",
     "longDescription": "Edit local LaTeX projects with a live PDF preview, SyncTeX navigation, project search, templates, and managed TeX runtimes.",
