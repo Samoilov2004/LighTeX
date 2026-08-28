@@ -8,17 +8,15 @@
   A focused local LaTeX editor for macOS and Linux, with source and PDF side by side.
 </p>
 
-<p align="center">
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Apple-Silicon.dmg">
-    <img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-087CFA?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for an Apple Silicon Mac">
-  </a>
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Intel.dmg">
-    <img src="https://img.shields.io/badge/Download_for_macOS-Intel_Mac-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download LighTex for an Intel Mac">
-  </a>
-  <a href="https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-Linux-amd64.deb">
-    <img src="https://img.shields.io/badge/Download_for_Linux-Ubuntu_%2F_Debian-F0A030?style=for-the-badge&logo=linux&logoColor=white" alt="Download LighTex for Ubuntu or Debian Linux">
-  </a>
-</p>
+## Download
+
+| Your computer | Installer |
+| :--- | :--- |
+| Apple Silicon Mac (`M1` and newer) | [**Download the macOS DMG**](https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Apple-Silicon.dmg) |
+| Intel Mac | [**Download the macOS DMG**](https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Intel.dmg) |
+| Ubuntu or Debian (`x86_64`) | [**Download the Linux DEB**](https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-Linux-amd64.deb) |
+
+[View LighTex 1.1.0 and its checksums](https://github.com/Samoilov2004/LighTeX/releases/tag/v1.1.0)
 
 <p align="center">
   Apple Silicon: macOS 11+ · Intel Mac: macOS 10.15+ · Linux: Ubuntu 22.04+ or Debian 12+, x86_64
