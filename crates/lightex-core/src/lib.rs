@@ -1,0 +1,21 @@
+pub mod build;
+pub mod completion;
+pub mod document;
+pub mod error;
+pub mod models;
+pub mod monitor;
+pub mod outline;
+pub mod paths;
+pub mod project;
+pub mod runtime;
+pub mod search;
+pub mod settings;
+pub mod synctex;
+pub mod template;
+pub mod toolchain;
+pub mod update;
+
+pub use error::{CoreError, CoreResult};
+pub use models::*;
+pub use monitor::ProjectMonitor;
+pub use project::ProjectRegistry;

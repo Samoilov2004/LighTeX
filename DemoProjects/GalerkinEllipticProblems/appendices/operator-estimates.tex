@@ -1,0 +1,32 @@
+\section{Operator interpretation}
+\label{app:operator}
+
+Define $\mathcal A:\V\to\V'$ by
+\begin{equation}
+  \dual{\mathcal Aw}{v}_{\V',\V}=a(w,v).
+  \label{eq:operator-definition}
+\end{equation}
+Continuity implies $\norm{\mathcal A}_{\mathcal L(\V,\V')}\leq M$, while
+coercivity and the Lax--Milgram theorem imply that $\mathcal A$ is invertible
+with $\norm{\mathcal A^{-1}}\leq m^{-1}$.
+
+Let $P_h:\V\to\Vh$ be the Ritz projection defined by
+\begin{equation}
+  a(P_hw,v_h)=a(w,v_h)
+  \qquad\forall v_h\in\Vh.
+  \label{eq:ritz-projection}
+\end{equation}
+Then $u_h=P_hu$, and C\'ea's lemma gives
+\begin{equation}
+  \norm{I-P_h}_{\mathcal L(\V,\V)}
+  \leq \frac{M}{m}.
+  \label{eq:ritz-bound}
+\end{equation}
+For a symmetric bilinear form, $P_h$ is orthogonal in the energy inner
+product, so the sharper best-approximation identity
+\begin{equation}
+  \energy{u-P_hu}
+  =\inf_{v_h\in\Vh}\energy{u-v_h}
+  \label{eq:energy-best-approximation}
+\end{equation}
+holds.

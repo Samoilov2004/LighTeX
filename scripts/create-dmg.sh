@@ -11,17 +11,15 @@ PROJECT_DIRECTORY="${SCRIPT_DIRECTORY:h}"
 APP_SOURCE="${1:A}"
 OUTPUT_DMG="${2:A}"
 VOLUME_NAME="${3:-LighTex}"
-WORK_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/lightex-dmg.XXXXXX")"
-BACKGROUND_PATH="${WORK_DIRECTORY}/background.png"
+BACKGROUND_PATH="${PROJECT_DIRECTORY}/Resources/DMGBackground.png"
 DMGBUILD="${DMGBUILD_EXECUTABLE:-}"
-
-cleanup() {
-    rm -rf "${WORK_DIRECTORY}"
-}
-trap cleanup EXIT INT TERM
 
 if [[ ! -d "${APP_SOURCE}" ]]; then
     echo "Application bundle not found: ${APP_SOURCE}" >&2
+    exit 1
+fi
+if [[ ! -f "${BACKGROUND_PATH}" ]]; then
+    echo "DMG background not found: ${BACKGROUND_PATH}" >&2
     exit 1
 fi
 
@@ -34,21 +32,6 @@ if [[ -z "${DMGBUILD}" || ! -x "${DMGBUILD}" ]]; then
 fi
 
 mkdir -p "${OUTPUT_DMG:h}"
-COMPATIBLE_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk"
-if [[ -d "${COMPATIBLE_SDK}" ]]; then
-    SDK_ROOT="${COMPATIBLE_SDK}"
-else
-    SDK_ROOT="$(xcrun --sdk macosx --show-sdk-path)"
-fi
-MODULE_CACHE="${WORK_DIRECTORY}/module-cache"
-mkdir -p "${MODULE_CACHE}"
-env \
-    SDKROOT="${SDK_ROOT}" \
-    CLANG_MODULE_CACHE_PATH="${MODULE_CACHE}" \
-    SWIFTPM_MODULECACHE_OVERRIDE="${MODULE_CACHE}" \
-    swift "${SCRIPT_DIRECTORY}/generate-dmg-background.swift" \
-    "${BACKGROUND_PATH}"
-
 if [[ -e "${OUTPUT_DMG}" ]]; then
     rm -f "${OUTPUT_DMG}"
 fi

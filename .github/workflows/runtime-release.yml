@@ -1,82 +1,76 @@
-name: Release LighTeX Runtime
+name: Build LighTex Managed Runtimes
 
 on:
   workflow_dispatch:
     inputs:
       runtime_version:
-        description: Runtime version written into the signed manifest
+        description: Runtime version
         required: true
         default: "2026.1"
       texlive_year:
-        description: TeX Live release year
+        description: TeX Live year
         required: true
         default: "2026"
-      source_run_id:
-        description: Optional completed runtime run whose artifacts should be republished without rebuilding
-        required: false
-        default: ""
+      publish:
+        description: Replace runtime-v2-latest after all nine assets pass
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
 
 jobs:
-  release-preflight:
-    runs-on: ubuntu-latest
-    env:
-      RUNTIME_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
+  preflight:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Verify manifest signing key is configured
-        shell: bash
-        run: |
-          missing=()
-          [[ -n "$RUNTIME_SIGNING_PRIVATE_KEY_BASE64" ]] || missing+=(RUNTIME_SIGNING_PRIVATE_KEY_BASE64)
-          if (( ${#missing[@]} )); then
-            printf 'Missing required GitHub Secret: %s\n' "${missing[@]}"
-            exit 1
-          fi
+      - name: Require the Ed25519 manifest key
+        env:
+          RUNTIME_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
+        run: test -n "$RUNTIME_SIGNING_PRIVATE_KEY_BASE64"
 
-  build-runtime:
-    if: inputs.source_run_id == ''
-    needs: release-preflight
+  build:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
         variant: [minimal, standard, full]
         platform:
-          - architecture: arm64
+          - name: macOs
+            architecture: arm64
             runner: macos-15
-          - architecture: x86_64
+          - name: macOs
+            architecture: x86_64
             runner: macos-15-intel
+          - name: linux
+            architecture: x86_64
+            runner: ubuntu-22.04
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify runner architecture
+      - name: Verify architecture
         run: test "$(uname -m)" = "${{ matrix.platform.architecture }}"
-
-      - name: Build portable runtime
+      - name: Build portable TeX Live runtime
         env:
           CODE_SIGN_IDENTITY: "-"
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
         run: |
           ./scripts/build-runtime.sh \
             "${{ matrix.variant }}" \
+            "${{ matrix.platform.name }}" \
             "${{ matrix.platform.architecture }}" \
-            "${{ inputs.runtime_version }}" \
+            "$RUNTIME_VERSION" \
             "$RUNNER_TEMP/runtime-output"
-
       - uses: actions/upload-artifact@v4
         with:
-          name: runtime-${{ matrix.variant }}-${{ matrix.platform.architecture }}
+          name: runtime-${{ matrix.variant }}-${{ matrix.platform.name }}-${{ matrix.platform.architecture }}
           path: ${{ runner.temp }}/runtime-output/*
           compression-level: 0
 
-  publish-runtime:
-    if: >-
-      always() &&
-      needs.release-preflight.result == 'success' &&
-      (needs.build-runtime.result == 'success' || inputs.source_run_id != '')
-    needs: [release-preflight, build-runtime]
-    runs-on: ubuntu-latest
+  manifest:
+    needs: build
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -84,40 +78,35 @@ jobs:
           pattern: runtime-*
           path: runtime-assets
           merge-multiple: true
-          run-id: ${{ inputs.source_run_id || github.run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Split assets above the GitHub Releases limit
-        run: python3 scripts/split-runtime-release-assets.py runtime-assets
-
-      - name: Generate signed manifest
+      - run: python3 scripts/split-runtime-release-assets.py runtime-assets
+      - name: Generate and sign runtime manifest
         env:
           SIGNING_KEY_BASE64: ${{ secrets.RUNTIME_SIGNING_PRIVATE_KEY_BASE64 }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          TEXLIVE_YEAR: ${{ inputs.texlive_year }}
+          RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/runtime-v2-latest
         run: |
           python3 scripts/generate-runtime-manifest.py \
             --metadata-directory runtime-assets \
-            --runtime-version "${{ inputs.runtime_version }}" \
-            --texlive-year "${{ inputs.texlive_year }}" \
-            --release-base-url "https://github.com/${{ github.repository }}/releases/download/runtime-latest" \
+            --runtime-version "$RUNTIME_VERSION" \
+            --texlive-year "$TEXLIVE_YEAR" \
+            --release-base-url "$RELEASE_BASE_URL" \
             --output runtime-assets/runtime-manifest.json
           echo "$SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/runtime-signing-key.pem"
-          openssl pkeyutl -sign -rawin \
-            -inkey "$RUNNER_TEMP/runtime-signing-key.pem" \
-            -in runtime-assets/runtime-manifest.json \
-            -out runtime-assets/runtime-manifest.sig
-
-      - name: Publish stable runtime release
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/runtime-signing-key.pem" \
+            -in runtime-assets/runtime-manifest.json -out runtime-assets/runtime-manifest.sig
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-release-assets
+          path: runtime-assets/*
+          compression-level: 0
+      - name: Publish after explicit approval
+        if: inputs.publish && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
         run: |
-          gh release view runtime-latest >/dev/null 2>&1 || \
-            gh release create runtime-latest \
-              --target "${{ github.sha }}" \
-              --title "LighTeX Runtime Preview" \
-              --prerelease \
-              --notes "Managed TeX Live runtime assets for the first preview. Executables use an ad-hoc signature; archive integrity is protected by the signed manifest and SHA-256 hashes."
-          gh release upload runtime-latest \
-            runtime-assets/*.zip* \
-            runtime-assets/runtime-manifest.json \
-            runtime-assets/runtime-manifest.sig \
-            --clobber
+          gh release view runtime-v2-latest --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create runtime-v2-latest --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "LighTex Managed Runtime ${RUNTIME_VERSION}" --prerelease \
+              --notes "Signed managed TeX Live runtimes for LighTex 1.1 on macOS and Linux."
+          gh release upload runtime-v2-latest runtime-assets/*.zip* runtime-assets/runtime-manifest.json runtime-assets/runtime-manifest.sig --repo "${{ github.repository }}" --clobber

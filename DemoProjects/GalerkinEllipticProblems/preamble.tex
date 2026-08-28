@@ -1,0 +1,42 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,margin=30mm]{geometry}
+
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\usepackage[colorlinks=true,linkcolor=blue!55!black,citecolor=teal!55!black,
+            urlcolor=blue!55!black]{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\V}{V}
+\newcommand{\Vh}{V_h}
+\newcommand{\Th}{\mathcal{T}_h}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\seminorm}[1]{\left\lvert #1 \right\rvert}
+\newcommand{\inner}[2]{\left( #1,#2 \right)}
+\newcommand{\dual}[2]{\left\langle #1,#2 \right\rangle}
+\newcommand{\energy}[1]{\norm{#1}_{a}}
+
+\setcounter{tocdepth}{2}
+\setlist{nosep}
+\numberwithin{equation}{section}

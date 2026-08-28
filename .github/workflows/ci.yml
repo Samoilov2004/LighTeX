@@ -1,7 +1,9 @@
-name: LighTeX CI
+name: LighTex CI
 
 on:
   push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -9,29 +11,66 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: macos-15
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            name: macOS-arm64
+            target: aarch64-apple-darwin
+            bundle: app
+          - runner: macos-15-intel
+            name: macOS-x86_64
+            target: x86_64-apple-darwin
+            bundle: app
+          - runner: ubuntu-22.04
+            name: Linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            bundle: deb
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
-
-      - name: Require an executable test runtime
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
         run: |
-          xcrun --find xctest
-          test -x "$(xcrun --find xctest)"
-
-      - name: Run Swift tests
-        env:
-          LIGHTEX_REQUIRE_TEST_EXECUTION: "1"
-        run: ./Scripts/test.sh
-
-      - name: Build production app
-        run: ./Scripts/build-app.sh
-
-      - name: Verify bundle and signature
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev wget
+      - run: pnpm install --frozen-lockfile
+      - name: Test Rust core and desktop commands
+        run: cargo test --workspace --target "${{ matrix.target }}"
+      - name: Verify generated Rust/TypeScript contracts
+        run: git diff --exit-code -- crates/lightex-core/bindings
+      - name: Test React UI
+        run: pnpm --dir apps/desktop test
+      - name: Build Safari 13 compatible frontend
+        run: pnpm --dir apps/desktop build:web
+      - name: Build native package
+        run: pnpm --dir apps/desktop tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundle }}"
+      - name: Verify macOS application bundle
+        if: runner.os == 'macOS'
         run: |
-          test -x dist/LighTex.app/Contents/MacOS/LighTex
-          plutil -lint dist/LighTex.app/Contents/Info.plist
-          codesign --verify --deep --strict --verbose=2 dist/LighTex.app
+          APP="target/${{ matrix.target }}/release/bundle/macos/LighTex.app"
+          test -x "$APP/Contents/MacOS/LighTex"
+          file "$APP/Contents/MacOS/LighTex" | grep -q 'Mach-O'
+          plutil -lint "$APP/Contents/Info.plist"
+      - name: Verify Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          DEB="$(find "target/${{ matrix.target }}/release/bundle/deb" -type f -name '*.deb' -print -quit)"
+          test -n "$DEB"
+          dpkg-deb --info "$DEB"

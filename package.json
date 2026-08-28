@@ -1,0 +1,13 @@
+{
+  "name": "lightex-workspace",
+  "version": "1.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --dir apps/desktop tauri dev",
+    "build": "pnpm --dir apps/desktop tauri build",
+    "build:web": "pnpm --dir apps/desktop build:web",
+    "test:web": "pnpm --dir apps/desktop test",
+    "check": "cargo test --workspace && pnpm test:web && pnpm build:web"
+  }
+}

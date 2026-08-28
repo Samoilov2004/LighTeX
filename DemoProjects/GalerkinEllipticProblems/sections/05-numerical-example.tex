@@ -1,0 +1,47 @@
+\section{Manufactured-solution experiment}
+\label{sec:numerics}
+
+Consider the Poisson equation on $\Omega=(0,1)^2$ with exact solution
+\begin{equation}
+  u(x,y)=\sin(\pi x)\sin(\pi y),
+  \qquad
+  f(x,y)=2\pi^2\sin(\pi x)\sin(\pi y).
+  \label{eq:manufactured-solution}
+\end{equation}
+We use uniform diagonal triangulations and continuous $\mathbb P_1$ elements.
+The observed rate between two consecutive meshes is
+\begin{equation}
+  \operatorname{rate}_\ell
+  =\frac{\log(E_{\ell-1}/E_\ell)}{\log(h_{\ell-1}/h_\ell)}.
+  \label{eq:observed-rate}
+\end{equation}
+
+\begin{table}[ht]
+  \centering
+  \caption{Representative discretization errors for uniform refinement.}
+  \label{tab:convergence}
+  \begin{tabular}{rrrrr}
+    \toprule
+    level & degrees of freedom & $h$ & $\norm{u-u_h}_{H^1}$ & rate \\
+    \midrule
+    2 & 9    & 0.25000 & $2.11\times10^{-1}$ & --   \\
+    3 & 49   & 0.12500 & $1.04\times10^{-1}$ & 1.02 \\
+    4 & 225  & 0.06250 & $5.17\times10^{-2}$ & 1.01 \\
+    5 & 961  & 0.03125 & $2.58\times10^{-2}$ & 1.00 \\
+    6 & 3969 & 0.01563 & $1.29\times10^{-2}$ & 1.00 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \input{figures/convergence-plot}
+  \caption{Energy error under uniform refinement. The dashed reference line
+  has slope one, in agreement with \cref{cor:energy-rate}.}
+  \label{fig:convergence}
+\end{figure}
+
+The experiment exhibits the expected first-order decay in the energy norm.
+For sufficiently fine meshes, the error and the reference curve are parallel
+on the logarithmic scale. The CSV file used by \cref{fig:convergence} is
+reproducible with \path{scripts/generate_convergence_data.py}.

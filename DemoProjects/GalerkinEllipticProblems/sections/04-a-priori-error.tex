@@ -1,0 +1,77 @@
+\section{A priori error estimates}
+\label{sec:error-estimates}
+
+We first isolate the abstract stability argument.
+
+\begin{theorem}[C\'ea's lemma]
+\label{thm:cea}
+Let $u\in\V$ and $u_h\in\Vh$ solve the continuous and discrete problems.
+Under \cref{eq:continuity,eq:coercivity},
+\begin{equation}
+  \norm{u-u_h}_{\V}
+  \leq \frac{M}{m}
+  \inf_{v_h\in\Vh}\norm{u-v_h}_{\V}.
+  \label{eq:cea-estimate}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+For arbitrary $v_h\in\Vh$, coercivity and Galerkin orthogonality imply
+\begin{align*}
+  m\norm{u-u_h}_{\V}^2
+  &\leq a(u-u_h,u-u_h)\\
+  &=a(u-u_h,u-v_h)\\
+  &\leq M\norm{u-u_h}_{\V}\norm{u-v_h}_{\V}.
+\end{align*}
+Cancel the error norm and take the infimum over $v_h$.
+\end{proof}
+
+Let $I_hu$ denote the nodal interpolant. For $u\in H^2(\Omega)$ and a
+shape-regular mesh,
+\begin{equation}
+  \norm{u-I_hu}_{H^1(\Omega)}
+  \leq C_{\mathrm{int}}h\seminorm{u}_{H^2(\Omega)}.
+  \label{eq:interpolation-estimate}
+\end{equation}
+Combining \cref{thm:cea,eq:interpolation-estimate} gives the principal energy
+estimate.
+
+\begin{corollary}[First-order energy convergence]
+\label{cor:energy-rate}
+If $u\in H^2(\Omega)\cap H_0^1(\Omega)$, then
+\begin{equation}
+  \norm{u-u_h}_{H^1(\Omega)}
+  \leq C h\seminorm{u}_{H^2(\Omega)},
+  \label{eq:h1-error}
+\end{equation}
+where $C$ is independent of $h$.
+\end{corollary}
+
+An additional regularity assumption produces a higher-order $L^2$ estimate.
+For $e=u-u_h$, let $z\in\V$ solve the adjoint problem
+\begin{equation}
+  a(v,z)=\inner{e}{v}_{L^2(\Omega)}
+  \qquad\text{for every }v\in\V.
+  \label{eq:dual-problem}
+\end{equation}
+Assume elliptic regularity $\norm{z}_{H^2}\leq C_{\mathrm{reg}}\norm{e}_{L^2}$.
+Using Galerkin orthogonality with $I_hz$ gives
+\begin{align}
+  \norm{e}_{L^2}^2
+  &=a(e,z-I_hz)\notag\\
+  &\leq C h\norm{e}_{H^1}\norm{z}_{H^2}
+  \leq C h\norm{e}_{H^1}\norm{e}_{L^2}.
+  \label{eq:duality-chain}
+\end{align}
+Together with \cref{eq:h1-error}, this proves
+\begin{equation}
+  \norm{u-u_h}_{L^2(\Omega)}
+  \leq C h^2\seminorm{u}_{H^2(\Omega)}.
+  \label{eq:l2-error}
+\end{equation}
+
+\begin{remark}
+The $L^2$ rate depends on adjoint regularity and may deteriorate on nonconvex
+domains with re-entrant corners. The energy estimate remains quasi-optimal
+without this extra assumption.
+\end{remark}

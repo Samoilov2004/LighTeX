@@ -1,0 +1,39 @@
+\documentclass[11pt]{article}
+
+\input{preamble}
+
+\title{Energy-Norm Error Estimates for\\
+Conforming Galerkin Approximations of Elliptic Problems}
+\author{LighTex Research Notes}
+\date{August 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract$\Gamma$}
+We study conforming finite-element approximations of a uniformly elliptic
+Dirichlet problem. Starting from the variational formulation, we derive
+Galerkin orthogonality, prove quasi-optimality in the energy norm, and obtain
+an improved $L^2$ estimate by a duality argument. A manufactured solution on
+the unit square illustrates the predicted convergence rates and separates the
+roles of stability, approximation, and elliptic regularity in the analysis.
+\end{abstract}
+
+\
+
+\tableofcontents
+
+\input{sections/01-introduction}
+\input{sections/02-functional-setting}
+\input{sections/03-galerkin-method}
+\input{sections/04-a-priori-error}
+\input{sections/05-numerical-example}
+
+\appendix
+\input{appendices/operator-estimates}
+
+\bibliographystyle{alpha}
+\bibliography{references}
+
+\end{document}

@@ -20,20 +20,32 @@ for path in sorted(args.metadata_directory.glob("*.metadata.json")):
     if archive_parts:
         item["downloadParts"] = [
             {
-                "downloadURL": f"{args.release_base_url.rstrip('/')}/{part['archiveName']}",
+                "downloadUrl": f"{args.release_base_url.rstrip('/')}/{part['archiveName']}",
                 "compressedSize": part["compressedSize"],
             }
             for part in archive_parts
         ]
     else:
-        item["downloadURL"] = f"{args.release_base_url.rstrip('/')}/{archive_name}"
+        item["downloadUrl"] = f"{args.release_base_url.rstrip('/')}/{archive_name}"
     assets.append(item)
 
-if len(assets) != 6:
-    raise SystemExit(f"Expected six runtime assets, found {len(assets)}")
+expected = {
+    (variant, platform, architecture)
+    for variant in ("minimal", "standard", "full")
+    for platform, architecture in (
+        ("macOs", "arm64"),
+        ("macOs", "x86_64"),
+        ("linux", "x86_64"),
+    )
+}
+actual = {(item["variant"], item["platform"], item["architecture"]) for item in assets}
+if actual != expected or len(assets) != 9:
+    raise SystemExit(
+        f"Expected nine unique runtime assets; missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+    )
 
 manifest = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "runtimeVersion": args.runtime_version,
     "texLiveYear": args.texlive_year,
     "assets": assets,

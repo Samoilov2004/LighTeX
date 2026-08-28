@@ -1,0 +1,67 @@
+\section{Weak formulation and well-posedness}
+\label{sec:weak-formulation}
+
+Set $\V=H_0^1(\Omega)$ and equip it with the norm
+$\norm{v}_{\V}=\norm{\nabla v}_{L^2(\Omega)}$. Poincar\'e's inequality makes
+this norm equivalent to the usual $H^1$ norm on $H_0^1(\Omega)$; see
+\cite[Chapter~5]{evans2010}. Define
+\begin{align}
+  a(w,v)
+  &:=\int_\Omega A\nabla w\cdot\nabla v\,\mathrm dx
+     +\int_\Omega cwv\,\mathrm dx,
+  \label{eq:bilinear-form}\\
+  F(v)
+  &:=\int_\Omega fv\,\mathrm dx.
+  \label{eq:load-functional}
+\end{align}
+
+\begin{definition}[Weak solution]
+  A function $u\in\V$ is a weak solution of \cref{eq:strong-problem} if
+  \begin{equation}
+    a(u,v)=F(v)
+    \qquad\text{for every }v\in\V.
+    \label{eq:weak-problem}
+  \end{equation}
+\end{definition}
+
+\begin{lemma}[Continuity and coercivity]
+\label{lem:continuous-coercive}
+There exist constants $M>0$ and $m>0$ such that
+\begin{align}
+  \lvert a(w,v)\rvert
+  &\leq M\norm{w}_{\V}\norm{v}_{\V},
+  \label{eq:continuity}\\
+  a(v,v)
+  &\geq m\norm{v}_{\V}^2
+  \label{eq:coercivity}
+\end{align}
+for all $w,v\in\V$.
+\end{lemma}
+
+\begin{proof}
+The upper spectral bound for $A$, H\"older's inequality, and Poincar\'e's
+inequality yield \cref{eq:continuity}. Since $c\geq0$, the lower spectral
+bound gives
+\[
+  a(v,v)\geq\alpha\norm{\nabla v}_{L^2(\Omega)}^2,
+\]
+so one may take $m=\alpha$ with the chosen norm.
+\end{proof}
+
+\begin{theorem}[Lax--Milgram well-posedness]
+\label{thm:lax-milgram}
+Problem \cref{eq:weak-problem} has a unique solution $u\in\V$, and
+\begin{equation}
+  \norm{u}_{\V}\leq \frac{C_P}{m}\norm{f}_{L^2(\Omega)},
+  \label{eq:stability-bound}
+\end{equation}
+where $C_P$ is the Poincar\'e constant of $\Omega$.
+\end{theorem}
+
+\begin{proof}
+The functional $F$ is continuous because
+$\lvert F(v)\rvert\leq C_P\norm{f}_{L^2}\norm{v}_{\V}$. The result follows
+from the Lax--Milgram theorem applied with
+\cref{lem:continuous-coercive}. Testing \cref{eq:weak-problem} with $v=u$
+gives the stated stability estimate.
+\end{proof}
