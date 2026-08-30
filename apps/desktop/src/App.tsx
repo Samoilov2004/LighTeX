@@ -23,6 +23,34 @@ export default function App() {
     void initialize();
   }, []);
   useEffect(() => {
+    const macOS = navigator.platform.toLowerCase().includes("mac");
+    document.documentElement.dataset.fullscreen = "false";
+    if (!isDesktop() || !macOS) return;
+    const appWindow = getCurrentWindow();
+    let active = true;
+    let revision = 0;
+    let unlisten: (() => void) | undefined;
+    const updateFullscreen = async () => {
+      const request = ++revision;
+      try {
+        const fullscreen = await appWindow.isFullscreen();
+        if (active && request === revision) document.documentElement.dataset.fullscreen = String(fullscreen);
+      } catch {
+        // Keep the regular titlebar spacing when the window state is unavailable.
+      }
+    };
+    const onResize = () => { void updateFullscreen(); };
+    window.addEventListener("resize", onResize);
+    void appWindow.onResized(onResize).then((value) => { unlisten = value; }).catch(() => undefined);
+    void updateFullscreen();
+    return () => {
+      active = false;
+      revision += 1;
+      window.removeEventListener("resize", onResize);
+      unlisten?.();
+    };
+  }, []);
+  useEffect(() => {
     if (!isDesktop()) return;
     let unlisten: (() => void) | undefined;
     void events.menuAction((action) => {

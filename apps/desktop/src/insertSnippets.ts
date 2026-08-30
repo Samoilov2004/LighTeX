@@ -1,4 +1,5 @@
 export type MathSnippetCategory = "Popular" | "Calculus" | "Linear Algebra" | "Structures";
+export type BlockSnippetCategory = "Popular" | "Callouts" | "Lists" | "Code" | "Text";
 export type SnippetTone = "blue" | "orange" | "green" | "red" | "violet" | "neutral";
 
 export interface LatexSnippet {
@@ -8,6 +9,7 @@ export interface LatexSnippet {
   preview: string;
   latex: string;
   category?: Exclude<MathSnippetCategory, "Popular">;
+  blockCategory?: Exclude<BlockSnippetCategory, "Popular">;
   featured?: boolean;
   requires?: string;
   tone?: SnippetTone;
@@ -20,6 +22,7 @@ export interface StyledTableOptions {
 }
 
 export const mathSnippetCategories: MathSnippetCategory[] = ["Popular", "Calculus", "Linear Algebra", "Structures"];
+export const blockSnippetCategories: BlockSnippetCategory[] = ["Popular", "Callouts", "Lists", "Code", "Text"];
 
 export const mathSnippets: LatexSnippet[] = [
   { id: "fraction", title: "Fraction", description: "Numerator over denominator", preview: "a ⁄ b", latex: "$\\frac{a}{b}$", category: "Structures", featured: true },
@@ -53,15 +56,28 @@ export function filterMathSnippets(category: MathSnippetCategory): LatexSnippet[
 }
 
 export const blockSnippets: LatexSnippet[] = [
-  { id: "note", title: "Note", description: "A calm informational callout", preview: "Note", latex: colorBlock("Note", "blue!5!white", "blue!55!black"), requires: "tcolorbox", tone: "blue" },
-  { id: "important", title: "Important", description: "Emphasize a key statement", preview: "Important", latex: colorBlock("Important", "orange!8!white", "orange!70!black"), requires: "tcolorbox", tone: "orange" },
-  { id: "definition", title: "Definition", description: "Highlight a new concept", preview: "Definition", latex: colorBlock("Definition", "violet!5!white", "violet!60!black"), requires: "tcolorbox", tone: "violet" },
-  { id: "warning", title: "Warning", description: "Call attention to a pitfall", preview: "Warning", latex: colorBlock("Warning", "red!5!white", "red!60!black"), requires: "tcolorbox", tone: "red" },
-  { id: "result", title: "Result", description: "Present a conclusion or result", preview: "Result", latex: colorBlock("Result", "green!5!white", "green!50!black"), requires: "tcolorbox", tone: "green" },
-  { id: "example", title: "Example", description: "Separate a worked example", preview: "Example", latex: colorBlock("Example", "gray!7!white", "gray!60!black"), requires: "tcolorbox", tone: "neutral" },
-  { id: "quote", title: "Quotation", description: "Indented quotation with author", preview: "“ … ”", latex: "\\begin{quote}\n  \\itshape Your quotation here.\n  \\hfill --- Author\n\\end{quote}", tone: "neutral" },
-  { id: "highlight", title: "Text Highlight", description: "Highlight a short phrase", preview: "Highlighted", latex: "% Requires \\usepackage{xcolor}\n\\colorbox{yellow!35}{Highlighted text}", requires: "xcolor", tone: "orange" },
+  { id: "note", title: "Note", description: "A calm informational callout", preview: "Note", latex: colorBlock("Note", "blue!5!white", "blue!55!black"), blockCategory: "Callouts", featured: true, requires: "tcolorbox", tone: "blue" },
+  { id: "important", title: "Important", description: "Emphasize a key statement", preview: "Important", latex: colorBlock("Important", "orange!8!white", "orange!70!black"), blockCategory: "Callouts", requires: "tcolorbox", tone: "orange" },
+  { id: "definition", title: "Definition", description: "Highlight a new concept", preview: "Definition", latex: colorBlock("Definition", "violet!5!white", "violet!60!black"), blockCategory: "Callouts", featured: true, requires: "tcolorbox", tone: "violet" },
+  { id: "warning", title: "Warning", description: "Call attention to a pitfall", preview: "Warning", latex: colorBlock("Warning", "red!5!white", "red!60!black"), blockCategory: "Callouts", requires: "tcolorbox", tone: "red" },
+  { id: "result", title: "Result", description: "Present a conclusion or result", preview: "Result", latex: colorBlock("Result", "green!5!white", "green!50!black"), blockCategory: "Callouts", requires: "tcolorbox", tone: "green" },
+  { id: "example", title: "Example", description: "Separate a worked example", preview: "Example", latex: colorBlock("Example", "gray!7!white", "gray!60!black"), blockCategory: "Callouts", requires: "tcolorbox", tone: "neutral" },
+  { id: "bullet-list", title: "Bulleted List", description: "Items marked with bullets", preview: "• First\n• Second", latex: "\\begin{itemize}\n  \\item First item\n  \\item Second item\n  \\item Third item\n\\end{itemize}", blockCategory: "Lists", featured: true, tone: "neutral" },
+  { id: "numbered-list", title: "Numbered List", description: "Sequentially numbered items", preview: "1. First\n2. Second", latex: "\\begin{enumerate}\n  \\item First item\n  \\item Second item\n  \\item Third item\n\\end{enumerate}", blockCategory: "Lists", featured: true, tone: "neutral" },
+  { id: "description-list", title: "Description List", description: "Terms followed by explanations", preview: "Term — details", latex: "\\begin{description}\n  \\item[First term] Description.\n  \\item[Second term] Description.\n\\end{description}", blockCategory: "Lists", tone: "neutral" },
+  { id: "nested-list", title: "Nested List", description: "A list with a second level", preview: "• Item\n  ◦ Detail", latex: "\\begin{itemize}\n  \\item Main item\n    \\begin{itemize}\n      \\item Nested item\n    \\end{itemize}\n  \\item Another item\n\\end{itemize}", blockCategory: "Lists", tone: "neutral" },
+  { id: "verbatim", title: "Code Block", description: "Literal code without an extra package", preview: "literal_text", latex: "\\begin{verbatim}\nLiteral text or code.\n\\end{verbatim}", blockCategory: "Code", featured: true, tone: "neutral" },
+  { id: "code-listing", title: "Highlighted Code", description: "Source code with language and caption", preview: "def hello():", latex: "% Requires \\usepackage{listings}\n\\begin{lstlisting}[language=Python, caption={Example}]\ndef hello():\n    print(\"Hello\")\n\\end{lstlisting}", blockCategory: "Code", featured: true, requires: "listings", tone: "neutral" },
+  { id: "inline-code", title: "Inline Code", description: "Monospaced text inside a paragraph", preview: "inline code", latex: "\\texttt{inline code}", blockCategory: "Code", tone: "neutral" },
+  { id: "quote", title: "Quotation", description: "Indented quotation with author", preview: "“ … ”", latex: "\\begin{quote}\n  \\itshape Your quotation here.\n  \\hfill --- Author\n\\end{quote}", blockCategory: "Text", featured: true, tone: "neutral" },
+  { id: "highlight", title: "Text Highlight", description: "Highlight a short phrase", preview: "Highlighted", latex: "% Requires \\usepackage{xcolor}\n\\colorbox{yellow!35}{Highlighted text}", blockCategory: "Text", requires: "xcolor", tone: "orange" },
 ];
+
+export function filterBlockSnippets(category: BlockSnippetCategory): LatexSnippet[] {
+  return category === "Popular"
+    ? blockSnippets.filter((snippet) => snippet.featured)
+    : blockSnippets.filter((snippet) => snippet.blockCategory === category);
+}
 
 export const figureSnippets: LatexSnippet[] = [
   { id: "figure-full", title: "Full-width Figure", description: "Centered at 90% text width", preview: "90%", latex: figureSnippet("0.9") },

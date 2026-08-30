@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ChevronLeft, ChevronRight, Maximize2, Minus, Plus, Search, X } from "lucide-react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import type { SyncTeXPdfTarget } from "../types";
+import type { OutlineItem, SyncTeXPdfTarget } from "../types";
 import { pdfjs } from "../pdf";
+import { findOutlinePages, findOutlinePagesFromBookmarks, type PdfBookmarkPage } from "../outlinePages";
 
 interface PdfPreviewProps {
   base64: string | null;
   target: SyncTeXPdfTarget | null;
+  outline: OutlineItem[];
+  onOutlinePages(pages: Record<string, number>): void;
   onInverse(page: number, x: number, yFromTop: number): void;
 }
 
-export function PdfPreview({ base64, target, onInverse }: PdfPreviewProps) {
+export function PdfPreview({ base64, target, outline, onOutlinePages, onInverse }: PdfPreviewProps) {
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(0.9);
@@ -20,12 +23,14 @@ export function PdfPreview({ base64, target, onInverse }: PdfPreviewProps) {
   const [matches, setMatches] = useState<Array<{ page: number; count: number }>>([]);
   const scroll = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
+  const pageTextCache = useRef<{ document: PDFDocumentProxy | null; texts: Array<string | undefined> }>({ document: null, texts: [] });
 
   useEffect(() => {
     let active = true;
     setDocument(null);
     setPage(1);
     setBasePageSize({ width: 612, height: 792 });
+    pageTextCache.current = { document: null, texts: [] };
     if (!base64) return;
     const binary = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
     const task = pdfjs.getDocument({ data: binary });
@@ -46,6 +51,44 @@ export function PdfPreview({ base64, target, onInverse }: PdfPreviewProps) {
       void task.destroy();
     };
   }, [base64]);
+
+  useEffect(() => {
+    if (!document || outline.length === 0) return;
+    let cancelled = false;
+    if (pageTextCache.current.document !== document) {
+      pageTextCache.current = { document, texts: Array.from({ length: document.numPages }) };
+    }
+    const cache = pageTextCache.current;
+    void (async () => {
+      const bookmarkPages = await extractBookmarkPages(document);
+      const mappedBookmarks = findOutlinePagesFromBookmarks(outline, bookmarkPages);
+      if (cancelled) return;
+      if (Object.keys(mappedBookmarks).length > 0) onOutlinePages(mappedBookmarks);
+      if (Object.keys(mappedBookmarks).length === outline.length) return;
+      let cursor = 0;
+      const loadPageText = async () => {
+        while (!cancelled) {
+          const index = cursor;
+          cursor += 1;
+          if (index >= document.numPages) return;
+          if (cache.texts[index] !== undefined) continue;
+          try {
+            const pdfPage = await document.getPage(index + 1);
+            const content = await pdfPage.getTextContent();
+            cache.texts[index] = content.items.map((item) => "str" in item ? item.str : "").join(" ");
+          } catch {
+            cache.texts[index] = "";
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, document.numPages) }, () => loadPageText()));
+      if (!cancelled) {
+        const textPages = findOutlinePages(outline, cache.texts.map((text) => text ?? ""));
+        onOutlinePages({ ...textPages, ...mappedBookmarks });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [document, outline, onOutlinePages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,6 +235,37 @@ export function PdfPreview({ base64, target, onInverse }: PdfPreviewProps) {
       </div>
     </section>
   );
+}
+
+type PdfOutlineNode = {
+  title: string;
+  dest: string | unknown[] | null;
+  items: PdfOutlineNode[];
+};
+
+async function extractBookmarkPages(document: PDFDocumentProxy): Promise<PdfBookmarkPage[]> {
+  try {
+    const tree = await document.getOutline() as PdfOutlineNode[] | null;
+    const bookmarks: PdfBookmarkPage[] = [];
+    const visit = async (items: PdfOutlineNode[]) => {
+      for (const item of items) {
+        let destination: unknown[] | null = null;
+        if (typeof item.dest === "string") destination = await document.getDestination(item.dest) as unknown[] | null;
+        else if (Array.isArray(item.dest)) destination = item.dest;
+        const reference = destination?.[0];
+        if (typeof reference === "number") bookmarks.push({ title: item.title, page: reference + 1 });
+        else if (reference && typeof reference === "object") {
+          const pageIndex = await document.getPageIndex(reference as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+          bookmarks.push({ title: item.title, page: pageIndex + 1 });
+        }
+        if (item.items.length > 0) await visit(item.items);
+      }
+    };
+    if (tree) await visit(tree);
+    return bookmarks;
+  } catch {
+    return [];
+  }
 }
 
 function PdfPage({ document, pageNumber, zoom, query, target, scrollRoot, estimatedSize, onInverse }: {

@@ -1,11 +1,14 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, FunctionSquare, Image, PanelsTopLeft, Search, Sigma, Table2, X } from "lucide-react";
 import { filterSymbols, symbolCategories, type SymbolCategory } from "../insertCatalog";
+import { MathSnippetPreview } from "./MathSnippetPreview";
 import {
-  blockSnippets,
+  blockSnippetCategories,
   createStyledTableLatex,
   figureSnippets,
+  filterBlockSnippets,
   filterMathSnippets,
+  type BlockSnippetCategory,
   mathSnippetCategories,
   type LatexSnippet,
   type MathSnippetCategory,
@@ -18,9 +21,11 @@ export function InsertShelf({ onClose }: { onClose(): void }) {
   const [query, setQuery] = useState("");
   const [symbolCategory, setSymbolCategory] = useState<"All" | SymbolCategory>("Greek");
   const [mathCategory, setMathCategory] = useState<MathSnippetCategory>("Popular");
+  const [blockCategory, setBlockCategory] = useState<BlockSnippetCategory>("Popular");
   const deferredQuery = useDeferredValue(query);
   const filteredSymbols = useMemo(() => filterSymbols(deferredQuery, symbolCategory), [deferredQuery, symbolCategory]);
   const filteredMath = useMemo(() => filterMathSnippets(mathCategory), [mathCategory]);
+  const filteredBlocks = useMemo(() => filterBlockSnippets(blockCategory), [blockCategory]);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,7 +60,12 @@ export function InsertShelf({ onClose }: { onClose(): void }) {
           </div>
           <div className="snippet-results"><div className="rich-snippet-grid">{filteredMath.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="math" />)}</div></div>
         </div>}
-        {category === "blocks" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{blockSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="block" />)}</div></div>}
+        {category === "blocks" && <div className="snippet-browser">
+          <div className="snippet-category-filter" role="toolbar" aria-label="Block categories">
+            {blockSnippetCategories.map((item) => <button key={item} className={item === blockCategory ? "selected" : ""} aria-pressed={item === blockCategory} onClick={() => setBlockCategory(item)}>{item}</button>)}
+          </div>
+          <div className="snippet-results"><div className="rich-snippet-grid">{filteredBlocks.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind={snippet.blockCategory === "Code" ? "code" : snippet.blockCategory === "Lists" ? "list" : "block"} />)}</div></div>
+        </div>}
         {category === "figures" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{figureSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="figure" />)}</div></div>}
         {category === "tables" && <TableBuilder />}
       </div>
@@ -72,11 +82,11 @@ function InsertButton({ label, latex, wide = false, title, command }: { label: s
   return <button className={wide ? "snippet-button" : "symbol-button"} title={title} aria-label={title ?? "Insert " + label} onClick={() => insertLatex(latex)}><strong>{label}</strong>{wide && <code>{latex.split("\n")[0]}</code>}{!wide && command && <small>{command.replace(/^\\/, "")}</small>}</button>;
 }
 
-function SnippetCard({ snippet, kind }: { snippet: LatexSnippet; kind: "math" | "block" | "figure" }) {
+function SnippetCard({ snippet, kind }: { snippet: LatexSnippet; kind: "math" | "block" | "figure" | "list" | "code" }) {
   const className = ["insert-snippet-card", kind, snippet.tone ? "tone-" + snippet.tone : ""].filter(Boolean).join(" ");
   return (
     <button className={className} aria-label={"Insert " + snippet.title} title={snippet.title + " — " + snippet.description} onClick={() => insertLatex(snippet.latex)}>
-      <span className="snippet-preview" aria-hidden="true">{snippet.preview}</span>
+      <span className="snippet-preview" aria-hidden="true">{kind === "math" ? <MathSnippetPreview id={snippet.id} fallback={snippet.preview} /> : snippet.preview}</span>
       <span className="snippet-copy">
         <strong>{snippet.title}</strong>
         <small>{snippet.description}</small>

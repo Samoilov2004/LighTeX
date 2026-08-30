@@ -73,6 +73,7 @@ interface AppState {
   insertShelfOpen: boolean;
   problemsOpen: boolean;
   outline: OutlineItem[];
+  outlinePages: Record<string, number>;
   outlineExpanded: boolean;
   outlineHeight: number;
   completion: ProjectCompletionIndex;
@@ -135,6 +136,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   insertShelfOpen: false,
   problemsOpen: false,
   outline: [],
+  outlinePages: {},
   outlineExpanded: true,
   outlineHeight: 180,
   completion: emptyCompletion,
@@ -170,6 +172,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             { relativePath: "main.tex", line: 9, title: "Main Result", level: 1 },
             { relativePath: "main.tex", line: 13, title: "Proof Strategy", level: 2 },
           ],
+          outlinePages: {
+            "main.tex:7:Introduction": 1,
+            "main.tex:9:Main Result": 2,
+            "main.tex:13:Proof Strategy": 2,
+          },
           buildState: preview === "problems" ? "failure" : "idle",
           problemsOpen: preview === "problems",
           buildResult: preview === "problems" ? {
@@ -290,6 +297,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         tabs: [],
         selectedPath: null,
         mainDocument,
+        outline: [],
+        outlinePages: {},
         outlineExpanded: session?.outlineExpanded ?? true,
         outlineHeight: Math.max(112, session?.outlineHeight ?? 180),
         buildResult: null,
@@ -339,7 +348,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     stopProjectListener?.();
     stopProjectListener = undefined;
     await api.closeProject(project.id);
-    set({ phase: "hub", project: null, entries: [], documents: {}, tabs: [], selectedPath: null });
+    set({ phase: "hub", project: null, entries: [], documents: {}, tabs: [], selectedPath: null, outline: [], outlinePages: {} });
     return true;
   },
 
@@ -559,6 +568,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         buildResult: result,
         pdfBase64,
+        outlinePages: result.succeeded ? {} : get().outlinePages,
         buildState: result.succeeded ? "success" : "failure",
         statusMessage: result.succeeded ? "Build succeeded" : "Build failed",
         problemsOpen: !result.succeeded && config.showProblemsOnFailure,

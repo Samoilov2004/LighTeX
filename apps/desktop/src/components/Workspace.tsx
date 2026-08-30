@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert, FileText, Folder, PanelLeft, PanelRight, Play, Search, Settings, Sigma, Square } from "lucide-react";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -11,6 +11,7 @@ import { EditorTabs } from "./EditorTabs";
 import { FileTree } from "./FileTree";
 import { InsertShelf } from "./InsertShelf";
 import { OutlineDrawer } from "./OutlineDrawer";
+import { outlineItemKey } from "../outlinePages";
 import { PdfPreview } from "./PdfPreview";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { SearchPanel } from "./SearchPanel";
@@ -31,6 +32,9 @@ export function Workspace() {
   const sourceEditorRef = useRef<SourceEditorHandle>(null);
   const selectedDocument = state.selectedPath ? state.documents[state.selectedPath] : null;
   const syncExecutable = state.activeToolchain.synctex?.path;
+  const acceptPdfOutlinePages = useCallback((pages: Record<string, number>) => {
+    useAppStore.setState((current) => ({ outlinePages: { ...pages, ...current.outlinePages } }));
+  }, []);
 
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
@@ -70,6 +74,46 @@ export function Workspace() {
     window.addEventListener("lightex:source-sync", sync);
     return () => window.removeEventListener("lightex:source-sync", sync);
   }, [state.project?.id, syncExecutable, state.buildResult?.previewPdfPath]);
+
+  useEffect(() => {
+    if (!isDesktop() || !state.project || !syncExecutable || !state.buildResult?.succeeded || !state.buildResult.previewPdfPath || !state.selectedPath) return;
+    if (state.documents[state.selectedPath]?.dirty) return;
+    const projectId = state.project.id;
+    const selectedPath = state.selectedPath;
+    const previewPdfPath = state.buildResult.previewPdfPath;
+    const buildResult = state.buildResult;
+    const outline = state.outline.filter((item) => item.relativePath === selectedPath);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const pages: Record<string, number> = {};
+        let cursor = 0;
+        const worker = async () => {
+          while (!cancelled) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= outline.length) return;
+            const item = outline[index];
+            try {
+              const target = await api.synctexForward(projectId, syncExecutable, item.relativePath, item.line, 1, previewPdfPath);
+              if (target?.page) pages[outlineItemKey(item)] = target.page;
+            } catch {
+              // A heading can be absent from SyncTeX (for example before its first successful build).
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, outline.length) }, () => worker()));
+        const current = useAppStore.getState();
+        if (!cancelled && current.project?.id === projectId && current.selectedPath === selectedPath && current.buildResult === buildResult) {
+          useAppStore.setState({ outlinePages: { ...current.outlinePages, ...pages } });
+        }
+      })();
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [state.project?.id, state.selectedPath, state.outline, state.buildResult, syncExecutable]);
 
   useEffect(() => {
     if (!isDesktop() || !state.project) return;
@@ -215,7 +259,7 @@ export function Workspace() {
             </div>
             {state.pdfVisible && <>
               <ResizeDivider axis="x" onMove={(delta) => setEditorFraction((fraction) => Math.max(0.3, Math.min(0.7, fraction + delta / Math.max(700, window.innerWidth - sidebarWidth))))} />
-              <PdfPreview base64={state.pdfBase64} target={pdfTarget} onInverse={async (page, x, y) => {
+              <PdfPreview base64={state.pdfBase64} target={pdfTarget} outline={state.outline} onOutlinePages={acceptPdfOutlinePages} onInverse={async (page, x, y) => {
                 if (!state.project || !syncExecutable || !state.buildResult?.previewPdfPath) return;
                 const target = await api.synctexInverse(state.project.id, syncExecutable, state.buildResult.previewPdfPath, page, x, y);
                 if (target) await state.openDocument(target.relativePath, target.line);

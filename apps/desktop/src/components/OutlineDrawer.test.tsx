@@ -10,7 +10,7 @@ function Harness({ initialExpanded = true, initialHeight = 180 }: { initialExpan
 }
 
 describe("OutlineDrawer", () => {
-  beforeEach(() => useAppStore.setState({ outline: [] }));
+  beforeEach(() => useAppStore.setState({ outline: [], outlinePages: {} }));
 
   it("opens and closes from the persistent Table of Contents header", () => {
     render(<Harness initialExpanded={false} />);
@@ -48,5 +48,15 @@ describe("OutlineDrawer", () => {
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 100 });
     fireEvent.pointerUp(window, { pointerId: 1, clientY: 100 });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows the compiled PDF page instead of the TeX source line", () => {
+    useAppStore.setState({
+      outline: [{ relativePath: "main.tex", line: 42, title: "Methods", level: 2 }],
+      outlinePages: { "main.tex:42:Methods": 7 },
+    });
+    render(<Harness />);
+    expect(screen.getByLabelText("PDF page 7")).toHaveTextContent("7");
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
   });
 });

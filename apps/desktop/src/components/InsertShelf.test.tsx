@@ -21,6 +21,13 @@ describe("InsertShelf", () => {
     expect(screen.getByRole("button", { name: "Insert Partial Derivative" })).toBeInTheDocument();
   });
 
+  it("renders math cards as structured formulas instead of unicode approximations", () => {
+    render(<InsertShelf onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Math" }));
+    expect(screen.getByRole("button", { name: "Insert Fraction" }).querySelector("mfrac")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Insert 2 × 2 Matrix" }).querySelector("mtable")).not.toBeNull();
+  });
+
   it("inserts styled text blocks with their package requirement", () => {
     let inserted = "";
     window.addEventListener("lightex:insert", (event) => { inserted = (event as CustomEvent<{ text: string }>).detail.text; }, { once: true });
@@ -29,6 +36,30 @@ describe("InsertShelf", () => {
     fireEvent.click(screen.getByRole("button", { name: "Insert Note" }));
     expect(inserted).toContain("\\usepackage[most]{tcolorbox}");
     expect(inserted).toContain("title=Note");
+  });
+
+  it("offers bulleted, numbered, and descriptive lists", () => {
+    let inserted = "";
+    window.addEventListener("lightex:insert", (event) => { inserted = (event as CustomEvent<{ text: string }>).detail.text; }, { once: true });
+    render(<InsertShelf onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Blocks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lists" }));
+    expect(screen.getByRole("button", { name: "Insert Bulleted List" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Insert Numbered List" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Insert Description List" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Insert Numbered List" }));
+    expect(inserted).toContain("\\begin{enumerate}");
+  });
+
+  it("inserts a code block that works without an extra package", () => {
+    let inserted = "";
+    window.addEventListener("lightex:insert", (event) => { inserted = (event as CustomEvent<{ text: string }>).detail.text; }, { once: true });
+    render(<InsertShelf onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Blocks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Insert Code Block" }));
+    expect(inserted).toContain("\\begin{verbatim}");
+    expect(screen.getByRole("button", { name: "Insert Highlighted Code" })).toHaveTextContent("listings");
   });
 
   it("inserts the chosen table size directly from the grid", () => {

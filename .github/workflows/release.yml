@@ -6,7 +6,7 @@ on:
       version:
         description: Stable release version
         required: true
-        default: "1.1.1"
+        default: "1.1.2"
       publish:
         description: Publish the GitHub Release after every package passes
         type: boolean
@@ -129,7 +129,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           TAG="v${RELEASE_VERSION}"
-          NOTES="LighTex ${RELEASE_VERSION} is the cross-platform Tauri release for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. It includes the local LaTeX editor, continuous PDF preview, SyncTeX, project templates, searchable symbol insertion, and managed TeX runtimes. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
+          NOTES="LighTex ${RELEASE_VERSION} improves the Insert Shelf with readable native formula previews, adds PDF page numbers to Table of Contents, expands reusable math, list, code, block, figure, and table insertion, and refines fullscreen project controls. Packages are provided for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "${{ github.repository }}" --latest --title "LighTex ${RELEASE_VERSION}" --notes "$NOTES"
           else
