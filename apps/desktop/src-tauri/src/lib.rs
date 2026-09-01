@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -11,9 +12,11 @@ use lightex_core::{
     AppConfigV1, AppUpdateInfo, BuildRequest, BuildResult, DocumentRevision, DocumentSnapshot,
     InstalledRuntime, ManagedRuntimeRecordV2, OpenBuffer, OutlineItem, PersonalTemplateManifestV2,
     ProjectChangeEvent, ProjectCompletionIndex, ProjectEntry, ProjectHandle, ProjectId,
-    ProjectMonitor, ProjectRegistry, ProjectSessionV2, ReplacePreview, RuntimeEnvironment,
-    RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant, SaveOutcome, SearchQuery, SearchResult,
-    StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget, TemplateReview, ToolchainStatus,
+    ProjectMonitor, ProjectRegistry, ProjectSessionV2, ProjectVersionId, ProjectVersionSummary,
+    ReplacePreview, RuntimeEnvironment, RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant,
+    SaveOutcome, SearchQuery, SearchResult, StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget,
+    TemplateReview, ToolchainStatus, VersionChangeSummary, VersionFileDiff, VersionLineSummary,
+    VersionPreviewEvent, VersionPreviewStatus, VersionRestoreOutcome, VersionSnapshotReview,
 };
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -25,6 +28,8 @@ struct DesktopState {
     monitor: Mutex<Option<ProjectMonitor>>,
     build_cancel: Mutex<Option<Arc<AtomicBool>>>,
     runtime_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    version_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    version_lock: Arc<Mutex<()>>,
 }
 
 impl Default for DesktopState {
@@ -34,6 +39,8 @@ impl Default for DesktopState {
             monitor: Mutex::new(None),
             build_cancel: Mutex::new(None),
             runtime_cancel: Mutex::new(None),
+            version_cancel: Mutex::new(HashMap::new()),
+            version_lock: Arc::new(Mutex::new(())),
         }
     }
 }
@@ -64,20 +71,34 @@ fn open_project(
     state: tauri::State<'_, DesktopState>,
     app: AppHandle,
 ) -> Result<ProjectHandle, String> {
+    lightex_core::version::recover_pending_restore(Path::new(&path)).map_err(String::from)?;
     let handle = state.projects.open(&path).map_err(String::from)?;
     let project_id = handle.id.clone();
     let root = state.projects.root(&project_id).map_err(String::from)?;
-    let monitor = ProjectMonitor::start(&root, move |change: ProjectChangeEvent| {
-        let _ = app.emit("project://changed", change);
-    })
-    .map_err(String::from)?;
+    let monitor = start_project_monitor(&root, app)?;
     *state.monitor.lock().expect("monitor lock poisoned") = Some(monitor);
     Ok(handle)
+}
+
+fn start_project_monitor(root: &Path, app: AppHandle) -> Result<ProjectMonitor, String> {
+    ProjectMonitor::start(root, move |change: ProjectChangeEvent| {
+        let _ = app.emit("project://changed", change);
+    })
+    .map_err(String::from)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 fn close_project(project_id: ProjectId, state: tauri::State<'_, DesktopState>) {
     *state.monitor.lock().expect("monitor lock poisoned") = None;
+    for cancel in state
+        .version_cancel
+        .lock()
+        .expect("version cancel lock poisoned")
+        .drain()
+        .map(|(_, cancel)| cancel)
+    {
+        cancel.store(true, Ordering::Relaxed);
+    }
     state.projects.close(&project_id);
 }
 
@@ -383,6 +404,323 @@ fn completion_index(
     Ok(lightex_core::completion::build_index(&root))
 }
 
+async fn run_version_task<T, F>(lock: Arc<Mutex<()>>, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().expect("version lock poisoned");
+        task()
+    })
+    .await
+    .map_err(|error| format!("The version operation stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn list_project_versions(
+    project_id: ProjectId,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<ProjectVersionSummary>, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::list(&root).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn review_project_version(
+    project_id: ProjectId,
+    main_document: Option<String>,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<VersionSnapshotReview, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::review(&root, main_document.as_deref()).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn create_project_version(
+    project_id: ProjectId,
+    name: String,
+    main_document: Option<String>,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<ProjectVersionSummary, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::create(
+            &root,
+            &name,
+            lightex_core::ProjectVersionKind::Named,
+            main_document,
+        )
+        .map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn rename_project_version(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    name: String,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<ProjectVersionSummary, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::rename(&root, &version_id, &name).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn delete_project_version(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<(), String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    if let Some(cancel) = state
+        .version_cancel
+        .lock()
+        .expect("version cancel lock poisoned")
+        .remove(&version_id.0)
+    {
+        cancel.store(true, Ordering::Relaxed);
+    }
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::remove(&root, &version_id).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn project_version_tree(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<ProjectEntry>, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::tree(&root, &version_id).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn read_project_version_file(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    relative_path: String,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<String, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::read_text(&root, &version_id, &relative_path).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn compare_project_version(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<VersionChangeSummary, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::compare(&root, &version_id).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn project_version_line_summary(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    buffers: Vec<OpenBuffer>,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<VersionLineSummary, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::line_summary(&root, &version_id, &buffers).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn project_version_file_diff(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    relative_path: String,
+    current_text: Option<String>,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<VersionFileDiff, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::file_diff(
+            &root,
+            &version_id,
+            &relative_path,
+            current_text.as_deref(),
+        )
+        .map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn restore_project_version(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    current_main_document: Option<String>,
+    state: tauri::State<'_, DesktopState>,
+    app: AppHandle,
+) -> Result<VersionRestoreOutcome, String> {
+    if let Some(cancel) = state
+        .build_cancel
+        .lock()
+        .expect("build lock poisoned")
+        .as_ref()
+    {
+        cancel.store(true, Ordering::Relaxed);
+    }
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    // Stop watching before the transactional tree replacement so LighTex never
+    // reports its own restore as an external edit conflict.
+    *state.monitor.lock().expect("monitor lock poisoned") = None;
+    let restore_root = root.clone();
+    let outcome = run_version_task(state.version_lock.clone(), move || {
+        lightex_core::version::restore(&restore_root, &version_id, current_main_document)
+            .map_err(Into::into)
+    })
+    .await;
+    if let Ok(monitor) = start_project_monitor(&root, app) {
+        *state.monitor.lock().expect("monitor lock poisoned") = Some(monitor);
+    }
+    outcome
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn build_project_version_preview(
+    mut request: BuildRequest,
+    version_id: ProjectVersionId,
+    state: tauri::State<'_, DesktopState>,
+    app: AppHandle,
+) -> Result<ProjectVersionSummary, String> {
+    let root = state
+        .projects
+        .root(&request.project_id)
+        .map_err(String::from)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    state
+        .version_cancel
+        .lock()
+        .expect("version cancel lock poisoned")
+        .insert(version_id.0.clone(), cancel.clone());
+    let building = lightex_core::version::set_preview_status(
+        &root,
+        &version_id,
+        VersionPreviewStatus::Building,
+        None,
+        None,
+    )
+    .map_err(String::from)?;
+    let _ = app.emit(
+        "version://preview",
+        VersionPreviewEvent {
+            version_id: version_id.clone(),
+            status: VersionPreviewStatus::Building,
+            message: None,
+        },
+    );
+    let result = async {
+        let (preview_root, manifest) =
+            lightex_core::version::materialize_preview(&root, &version_id)?;
+        request.entry_file = manifest.main_document.ok_or_else(|| {
+            lightex_core::CoreError::Message("This version has no main document to compile.".into())
+        })?;
+        lightex_core::build::run_cancellable(&preview_root, &request, cancel).await
+    }
+    .await;
+    state
+        .version_cancel
+        .lock()
+        .expect("version cancel lock poisoned")
+        .remove(&version_id.0);
+    let summary = match result {
+        Ok(result) if result.succeeded => lightex_core::version::set_preview_status(
+            &root,
+            &version_id,
+            VersionPreviewStatus::Ready,
+            None,
+            result.preview_pdf_path,
+        )
+        .map_err(String::from)?,
+        Ok(result) => {
+            let message = result
+                .diagnostics
+                .first()
+                .map(|group| group.primary.message.clone())
+                .unwrap_or_else(|| "The saved version could not be compiled.".into());
+            lightex_core::version::set_preview_status(
+                &root,
+                &version_id,
+                VersionPreviewStatus::Failed,
+                Some(message),
+                None,
+            )
+            .map_err(String::from)?
+        }
+        Err(lightex_core::CoreError::Cancelled) => lightex_core::version::set_preview_status(
+            &root,
+            &version_id,
+            VersionPreviewStatus::NotBuilt,
+            None,
+            None,
+        )
+        .map_err(String::from)?,
+        Err(error) => lightex_core::version::set_preview_status(
+            &root,
+            &version_id,
+            VersionPreviewStatus::Failed,
+            Some(error.to_string()),
+            None,
+        )
+        .map_err(String::from)?,
+    };
+    let _ = app.emit(
+        "version://preview",
+        VersionPreviewEvent {
+            version_id,
+            status: summary.preview_status,
+            message: summary.preview_error.clone(),
+        },
+    );
+    let _ = building;
+    Ok(summary)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn read_project_version_preview(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<String>, String> {
+    let root = state.projects.root(&project_id).map_err(String::from)?;
+    let Some(path) =
+        lightex_core::version::preview_pdf_path(&root, &version_id).map_err(String::from)?
+    else {
+        return Ok(None);
+    };
+    std::fs::read(path)
+        .map(|bytes| Some(STANDARD.encode(bytes)))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn detect_system_tex() -> ToolchainStatus {
     lightex_core::toolchain::detect_system()
@@ -502,6 +840,66 @@ async fn synctex_inverse(
         Path::new(&executable_path),
         &root,
         Path::new(&pdf_path),
+        page,
+        x,
+        y_from_top,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn synctex_project_version_forward(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    executable_path: String,
+    source_relative: String,
+    line: usize,
+    column: usize,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<SyncTeXPdfTarget>, String> {
+    let project_root = state.projects.root(&project_id).map_err(String::from)?;
+    let preview_root = lightex_core::version::preview_project_root(&project_root, &version_id)
+        .map_err(String::from)?;
+    let Some(pdf_path) = lightex_core::version::preview_pdf_path(&project_root, &version_id)
+        .map_err(String::from)?
+    else {
+        return Ok(None);
+    };
+    lightex_core::synctex::forward(
+        Path::new(&executable_path),
+        &preview_root,
+        &source_relative,
+        line,
+        column,
+        &pdf_path,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn synctex_project_version_inverse(
+    project_id: ProjectId,
+    version_id: ProjectVersionId,
+    executable_path: String,
+    page: usize,
+    x: f64,
+    y_from_top: f64,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<SyncTeXSourceTarget>, String> {
+    let project_root = state.projects.root(&project_id).map_err(String::from)?;
+    let preview_root = lightex_core::version::preview_project_root(&project_root, &version_id)
+        .map_err(String::from)?;
+    let Some(pdf_path) = lightex_core::version::preview_pdf_path(&project_root, &version_id)
+        .map_err(String::from)?
+    else {
+        return Ok(None);
+    };
+    lightex_core::synctex::inverse(
+        Path::new(&executable_path),
+        &preview_root,
+        &pdf_path,
         page,
         x,
         y_from_top,
@@ -646,6 +1044,10 @@ pub fn run() {
             let insert_shelf = MenuItemBuilder::with_id("insert-shelf", "Insert Shelf")
                 .accelerator("CmdOrCtrl+Shift+I")
                 .build(handle)?;
+            let save_version =
+                MenuItemBuilder::with_id("save-version", "Save Version…").build(handle)?;
+            let show_versions =
+                MenuItemBuilder::with_id("show-versions", "Show Versions").build(handle)?;
             let app_menu = SubmenuBuilder::new(handle, "LighTex")
                 .about(None)
                 .separator()
@@ -674,6 +1076,9 @@ pub fn run() {
                 .item(&build)
                 .item(&project_search)
                 .item(&insert_shelf)
+                .separator()
+                .item(&save_version)
+                .item(&show_versions)
                 .build()?;
             let view_menu = SubmenuBuilder::new(handle, "View").fullscreen().build()?;
             let window_menu = SubmenuBuilder::new(handle, "Window")
@@ -728,12 +1133,27 @@ pub fn run() {
             apply_replacements,
             document_outline,
             completion_index,
+            list_project_versions,
+            review_project_version,
+            create_project_version,
+            rename_project_version,
+            delete_project_version,
+            project_version_tree,
+            read_project_version_file,
+            compare_project_version,
+            project_version_line_summary,
+            project_version_file_diff,
+            restore_project_version,
+            build_project_version_preview,
+            read_project_version_preview,
             detect_system_tex,
             build_project,
             cancel_build,
             read_preview_pdf,
             synctex_forward,
             synctex_inverse,
+            synctex_project_version_forward,
+            synctex_project_version_inverse,
             runtime_manifest,
             installed_runtimes,
             runtime_environment,

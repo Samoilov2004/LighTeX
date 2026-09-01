@@ -3,8 +3,9 @@ import { useAppStore } from "../store";
 import { outlineItemKey } from "../outlinePages";
 
 export function OutlinePanel() {
-  const outline = useAppStore((state) => state.outline);
-  const outlinePages = useAppStore((state) => state.outlinePages);
+  const preview = useAppStore((state) => state.versionPreview);
+  const outline = preview?.outline ?? useAppStore.getState().outline;
+  const outlinePages = preview?.outlinePages ?? useAppStore.getState().outlinePages;
   const openDocument = useAppStore((state) => state.openDocument);
   if (outline.length === 0) {
     return <div className="sidebar-empty"><FileText size={20} /><span>No headings in this document.</span></div>;
@@ -16,8 +17,13 @@ export function OutlinePanel() {
           key={`${item.relativePath}:${item.line}:${item.title}`}
           style={{ paddingLeft: 9 + Math.max(0, item.level - 1) * 13 }}
           onClick={async () => {
-            await openDocument(item.relativePath, item.line);
-            window.dispatchEvent(new CustomEvent("lightex:source-sync", { detail: { path: item.relativePath, line: item.line, column: 1 } }));
+            if (preview) {
+              await useAppStore.getState().openVersionDocument(item.relativePath, item.line);
+              window.dispatchEvent(new CustomEvent("lightex:source-sync", { detail: { path: item.relativePath, line: item.line, column: 1 } }));
+            } else {
+              await openDocument(item.relativePath, item.line);
+              window.dispatchEvent(new CustomEvent("lightex:source-sync", { detail: { path: item.relativePath, line: item.line, column: 1 } }));
+            }
           }}
           title={`${item.title} — PDF page ${outlinePages[outlineItemKey(item)] ?? "not compiled"}`}
         >

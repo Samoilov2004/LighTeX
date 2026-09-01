@@ -18,6 +18,10 @@ export type { ProjectEntry } from "../../../crates/lightex-core/bindings/Project
 export type { ProjectHandle } from "../../../crates/lightex-core/bindings/ProjectHandle";
 export type { ProjectId } from "../../../crates/lightex-core/bindings/ProjectId";
 export type { ProjectSessionV2 } from "../../../crates/lightex-core/bindings/ProjectSessionV2";
+export type { ProjectVersionId } from "../../../crates/lightex-core/bindings/ProjectVersionId";
+export type { ProjectVersionKind } from "../../../crates/lightex-core/bindings/ProjectVersionKind";
+export type { ProjectVersionManifest } from "../../../crates/lightex-core/bindings/ProjectVersionManifest";
+export type { ProjectVersionSummary } from "../../../crates/lightex-core/bindings/ProjectVersionSummary";
 export type { ReplacePreview } from "../../../crates/lightex-core/bindings/ReplacePreview";
 export type { RuntimeArchitecture } from "../../../crates/lightex-core/bindings/RuntimeArchitecture";
 export type { RuntimeAsset } from "../../../crates/lightex-core/bindings/RuntimeAsset";
@@ -36,6 +40,18 @@ export type { TeXProvider } from "../../../crates/lightex-core/bindings/TeXProvi
 export type { TemplateReview } from "../../../crates/lightex-core/bindings/TemplateReview";
 export type { ToolExecutable } from "../../../crates/lightex-core/bindings/ToolExecutable";
 export type { ToolchainStatus } from "../../../crates/lightex-core/bindings/ToolchainStatus";
+export type { VersionChangeSummary } from "../../../crates/lightex-core/bindings/VersionChangeSummary";
+export type { VersionDiffLine } from "../../../crates/lightex-core/bindings/VersionDiffLine";
+export type { VersionDiffLineKind } from "../../../crates/lightex-core/bindings/VersionDiffLineKind";
+export type { VersionFileDiff } from "../../../crates/lightex-core/bindings/VersionFileDiff";
+export type { VersionFileEntry } from "../../../crates/lightex-core/bindings/VersionFileEntry";
+export type { VersionFileKind } from "../../../crates/lightex-core/bindings/VersionFileKind";
+export type { VersionLineSummary } from "../../../crates/lightex-core/bindings/VersionLineSummary";
+export type { VersionPreviewEvent } from "../../../crates/lightex-core/bindings/VersionPreviewEvent";
+export type { VersionPreviewStatus } from "../../../crates/lightex-core/bindings/VersionPreviewStatus";
+export type { VersionProjectRecord } from "../../../crates/lightex-core/bindings/VersionProjectRecord";
+export type { VersionRestoreOutcome } from "../../../crates/lightex-core/bindings/VersionRestoreOutcome";
+export type { VersionSnapshotReview } from "../../../crates/lightex-core/bindings/VersionSnapshotReview";
 
 import type { AppConfigV1 } from "../../../crates/lightex-core/bindings/AppConfigV1";
 import type { DocumentSnapshot } from "../../../crates/lightex-core/bindings/DocumentSnapshot";

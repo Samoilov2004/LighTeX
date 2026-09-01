@@ -27,6 +27,188 @@ pub struct ProjectEntry {
     pub children: Vec<ProjectEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectVersionId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionProjectRecord {
+    pub schema_version: u8,
+    pub id: String,
+    pub last_known_path: String,
+    pub root_identifier: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ProjectVersionKind {
+    Named,
+    Recovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum VersionPreviewStatus {
+    NotBuilt,
+    Building,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum VersionFileKind {
+    File,
+    Symlink,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionFileEntry {
+    pub relative_path: String,
+    pub kind: VersionFileKind,
+    pub blob_sha256: Option<String>,
+    #[ts(type = "number")]
+    pub size: u64,
+    pub unix_mode: Option<u32>,
+    pub link_target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProjectVersionManifest {
+    pub schema_version: u8,
+    pub id: ProjectVersionId,
+    pub project_record_id: String,
+    pub name: String,
+    pub created_at: String,
+    pub kind: ProjectVersionKind,
+    pub main_document: Option<String>,
+    pub directories: Vec<String>,
+    pub files: Vec<VersionFileEntry>,
+    #[ts(type = "number")]
+    pub total_size: u64,
+    pub preview_status: VersionPreviewStatus,
+    pub preview_error: Option<String>,
+    pub preview_pdf_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProjectVersionSummary {
+    pub id: ProjectVersionId,
+    pub name: String,
+    pub created_at: String,
+    pub kind: ProjectVersionKind,
+    pub main_document: Option<String>,
+    pub file_count: usize,
+    #[ts(type = "number")]
+    pub total_size: u64,
+    pub preview_status: VersionPreviewStatus,
+    pub preview_error: Option<String>,
+}
+
+impl From<&ProjectVersionManifest> for ProjectVersionSummary {
+    fn from(value: &ProjectVersionManifest) -> Self {
+        Self {
+            id: value.id.clone(),
+            name: value.name.clone(),
+            created_at: value.created_at.clone(),
+            kind: value.kind,
+            main_document: value.main_document.clone(),
+            file_count: value.files.len(),
+            total_size: value.total_size,
+            preview_status: value.preview_status,
+            preview_error: value.preview_error.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionChangeSummary {
+    pub added: Vec<String>,
+    pub modified: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionLineSummary {
+    pub additions: usize,
+    pub deletions: usize,
+    pub changed_files: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum VersionDiffLineKind {
+    Addition,
+    Deletion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionDiffLine {
+    pub kind: VersionDiffLineKind,
+    pub text: String,
+    pub old_line: Option<usize>,
+    pub new_line: Option<usize>,
+    /// One-based line in the saved document before which a deletion is rendered.
+    /// `new_line_count + 1` places it after the final line.
+    pub anchor_new_line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionFileDiff {
+    pub relative_path: String,
+    pub additions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+    pub lines: Vec<VersionDiffLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionSnapshotReview {
+    pub file_count: usize,
+    #[ts(type = "number")]
+    pub total_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionRestoreOutcome {
+    pub recovery_version: ProjectVersionSummary,
+    pub changed_paths: Vec<String>,
+    pub main_document: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VersionPreviewEvent {
+    pub version_id: ProjectVersionId,
+    pub status: VersionPreviewStatus,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

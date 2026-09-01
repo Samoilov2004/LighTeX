@@ -6,6 +6,8 @@ PROJECT_DIRECTORY="${SCRIPT_DIRECTORY:h}"
 SOURCE_ICON="${1:-${PROJECT_DIRECTORY}/Resources/AppIcon.png}"
 ICONSET_DIRECTORY="${PROJECT_DIRECTORY}/Resources/AppIcon.iconset"
 OUTPUT_ICON="${PROJECT_DIRECTORY}/Resources/AppIcon.icns"
+TAURI_ICON="${PROJECT_DIRECTORY}/apps/desktop/src-tauri/icons/icon.png"
+FRONTEND_ICON="${PROJECT_DIRECTORY}/apps/desktop/src/assets/AppIcon128.png"
 
 if [[ ! -f "${SOURCE_ICON}" ]]; then
     echo "Icon source not found: ${SOURCE_ICON}" >&2
@@ -33,4 +35,7 @@ resize_icon 512 icon_512x512.png
 resize_icon 1024 icon_512x512@2x.png
 
 python3 "${SCRIPT_DIRECTORY}/make-icns.py" "${ICONSET_DIRECTORY}" "${OUTPUT_ICON}"
-echo "Updated ${OUTPUT_ICON} from ${SOURCE_ICON}"
+sips -s format png -z 1024 1024 "${SOURCE_ICON}" --out "${TAURI_ICON}" >/dev/null
+sips -s format png -z 128 128 "${SOURCE_ICON}" --out "${FRONTEND_ICON}" >/dev/null
+
+echo "Updated the macOS, Linux, README, and in-app icon assets from ${SOURCE_ICON}"

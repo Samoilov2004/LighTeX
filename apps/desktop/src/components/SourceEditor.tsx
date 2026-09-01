@@ -3,10 +3,10 @@ import { acceptCompletion, autocompletion, closeBrackets, completionKeymap, type
 import { defaultKeymap, history, historyField, historyKeymap, indentWithTab, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView, drawSelection, dropCursor, highlightSpecialChars, keymap, lineNumbers } from "@codemirror/view";
+import { Compartment, EditorState, StateField } from "@codemirror/state";
+import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, dropCursor, gutter, highlightSpecialChars, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import type { AppConfigV1, ProjectCompletionIndex } from "../types";
+import type { AppConfigV1, ProjectCompletionIndex, VersionDiffLine, VersionFileDiff } from "../types";
 
 interface SourceEditorProps {
   path: string;
@@ -16,6 +16,8 @@ interface SourceEditorProps {
   completion: ProjectCompletionIndex;
   onChange(value: string): void;
   onUndoAvailabilityChange?(canUndo: boolean): void;
+  readOnly?: boolean;
+  diff?: VersionFileDiff | null;
 }
 
 export interface SourceEditorHandle {
@@ -49,7 +51,7 @@ const latexHighlight = HighlightStyle.define([
   { tag: tags.number, color: "#005cc5" },
 ]);
 
-export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(function SourceEditor({ path, historyKey, value, config, completion, onChange, onUndoAvailabilityChange }, ref) {
+export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(function SourceEditor({ path, historyKey, value, config, completion, onChange, onUndoAvailabilityChange, readOnly = false, diff = null }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const applyingExternal = useRef(false);
@@ -79,6 +81,8 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
       latexLanguage,
       syntaxHighlighting(latexHighlight),
       history(),
+      EditorState.readOnly.of(readOnly),
+      EditorView.editable.of(!readOnly),
       highlightSpecialChars(),
       drawSelection(),
       dropCursor(),
@@ -92,6 +96,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
         ...searchKeymap,
       ]),
       settingsCompartment.of(editorSettings(config)),
+      diffExtension(diff),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !applyingExternal.current) {
           onChangeRef.current(update.state.doc.toString());
@@ -119,6 +124,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
       state: editorState,
     });
     editor.contentDOM.setAttribute("aria-label", `LaTeX source: ${path}`);
+    editor.contentDOM.setAttribute("aria-readonly", String(readOnly));
     view.current = editor;
     onUndoAvailabilityChangeRef.current?.(undoDepth(editor.state) > 0);
     const jump = (event: Event) => {
@@ -129,6 +135,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
       editor.focus();
     };
     const insert = (event: Event) => {
+      if (readOnly) return;
       const text = (event as CustomEvent<{ text: string }>).detail.text;
       const selection = editor.state.selection.main;
       editor.dispatch({
@@ -148,7 +155,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
       editor.destroy();
       view.current = null;
     };
-  }, [historyKey, path]);
+  }, [historyKey, path, readOnly, diff]);
 
   useEffect(() => {
     const editor = view.current;
@@ -164,8 +171,97 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
     applyingExternal.current = false;
   }, [value]);
 
-  return <div className="source-editor" ref={host} data-testid="source-editor" />;
+  return <div className={`source-editor ${readOnly ? "read-only" : ""} ${diff?.lines.length ? "has-version-diff" : ""}`} ref={host} data-testid="source-editor" />;
 });
+
+class DeletedLineWidget extends WidgetType {
+  constructor(readonly line: VersionDiffLine) {
+    super();
+  }
+
+  eq(other: DeletedLineWidget) {
+    return this.line.oldLine === other.line.oldLine && this.line.text === other.line.text;
+  }
+
+  toDOM() {
+    const row = document.createElement("div");
+    row.className = "cm-version-deleted-row";
+    row.setAttribute("role", "note");
+    row.setAttribute("aria-label", `Removed line ${this.line.oldLine ?? ""}: ${this.line.text}`);
+    const number = document.createElement("span");
+    number.className = "cm-version-deleted-number";
+    number.textContent = String(this.line.oldLine ?? "");
+    const sign = document.createElement("span");
+    sign.className = "cm-version-deleted-sign";
+    sign.textContent = "−";
+    const text = document.createElement("span");
+    text.className = "cm-version-deleted-text";
+    text.textContent = this.line.text || " ";
+    row.append(number, sign, text);
+    return row;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class AddedLineMarker extends GutterMarker {
+  toDOM() {
+    const marker = document.createElement("span");
+    marker.className = "cm-version-added-sign";
+    marker.textContent = "+";
+    marker.setAttribute("aria-hidden", "true");
+    return marker;
+  }
+}
+
+const addedLineMarker = new AddedLineMarker();
+
+function diffExtension(diff: VersionFileDiff | null) {
+  if (!diff || diff.binary || diff.lines.length === 0) return [];
+  const decorationField = StateField.define<DecorationSet>({
+    create(state) {
+      return diffDecorations(state, diff);
+    },
+    update(decorations, transaction) {
+      return transaction.docChanged ? diffDecorations(transaction.state, diff) : decorations;
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  });
+  const additions = new Set(diff.lines.flatMap((line) => line.kind === "addition" && line.newLine ? [line.newLine] : []));
+  return [
+    decorationField,
+    gutter({
+      class: "cm-version-diff-gutter",
+      lineMarker(view, block) {
+        return additions.has(view.state.doc.lineAt(block.from).number) ? addedLineMarker : null;
+      },
+    }),
+  ];
+}
+
+function diffDecorations(state: EditorState, diff: VersionFileDiff): DecorationSet {
+  const ranges = diff.lines.flatMap((line) => {
+    if (line.kind === "addition" && line.newLine && line.newLine <= state.doc.lines) {
+      return [Decoration.line({
+        class: "cm-version-added-line",
+        attributes: { "data-version-diff": "added" },
+      }).range(state.doc.line(line.newLine).from)];
+    }
+    if (line.kind === "deletion") {
+      const afterDocument = line.anchorNewLine > state.doc.lines;
+      const position = afterDocument ? state.doc.length : state.doc.line(Math.max(1, line.anchorNewLine)).from;
+      return [Decoration.widget({
+        widget: new DeletedLineWidget(line),
+        block: true,
+        side: afterDocument ? 1 : -1,
+      }).range(position)];
+    }
+    return [];
+  });
+  return Decoration.set(ranges, true);
+}
 
 function cacheEditorState(key: string, state: unknown) {
   cachedEditorStates.delete(key);

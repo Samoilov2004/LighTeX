@@ -14,6 +14,7 @@ interface EditorTabsProps {
   onReorder(active: string, over: string): void;
   onMove(path: string, direction: -1 | 1): void;
   onFileDrop(path: string): void;
+  readOnly?: boolean;
 }
 
 export function EditorTabs(props: EditorTabsProps) {
@@ -31,6 +32,7 @@ export function EditorTabs(props: EditorTabsProps) {
     if (event.over && event.active.id !== event.over.id) props.onReorder(String(event.active.id), String(event.over.id));
   };
   const externalDrop = (event: React.DragEvent) => {
+    if (props.readOnly) return;
     event.preventDefault();
     setFileDropActive(false);
     const path = event.dataTransfer.getData("application/x-lightex-file");
@@ -96,7 +98,7 @@ export function EditorTabs(props: EditorTabsProps) {
         role="tablist"
         aria-label="Open files"
         onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("application/x-lightex-file")) {
+          if (!props.readOnly && event.dataTransfer.types.includes("application/x-lightex-file")) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "copy";
             setFileDropActive(true);
@@ -118,6 +120,7 @@ export function EditorTabs(props: EditorTabsProps) {
                 onSelect={props.onSelect}
                 onClose={props.onClose}
                 onMove={props.onMove}
+                readOnly={props.readOnly}
               />
             ))}
           </SortableContext>
@@ -156,7 +159,7 @@ export function EditorTabs(props: EditorTabsProps) {
             )}
           </div>
         )}
-        {fileDropActive && <div className="file-drop-badge">+ Open as tab</div>}
+        {fileDropActive && !props.readOnly && <div className="file-drop-badge">+ Open as tab</div>}
       </div>
       <DragOverlay dropAnimation={null}>
         {activeDrag && <TabSurface path={activeDrag} document={props.documents[activeDrag]} active overlay />}
@@ -165,28 +168,29 @@ export function EditorTabs(props: EditorTabsProps) {
   );
 }
 
-function EditorTab({ path, document, active, onSelect, onClose, onMove }: {
+function EditorTab({ path, document, active, onSelect, onClose, onMove, readOnly = false }: {
   path: string;
   document?: EditorDocument;
   active: boolean;
   onSelect(path: string): void;
   onClose(path: string): void;
   onMove(path: string, direction: -1 | 1): void;
+  readOnly?: boolean;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path, disabled: readOnly });
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 }}
       className="tab-wrapper"
       data-tab-path={path}
-      onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
+      onContextMenu={(event) => { if (!readOnly) { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); } }}
     >
       <div {...listeners}>
-        <TabSurface path={path} document={document} active={active} onSelect={onSelect} onClose={onClose} />
+        <TabSurface path={path} document={document} active={active} onSelect={onSelect} onClose={readOnly ? undefined : onClose} />
       </div>
-      {menu && (
+      {menu && !readOnly && (
         <div className="popover-menu context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
           <button role="menuitem" onClick={() => { onMove(path, -1); setMenu(null); }}>Move Tab Left</button>
           <button role="menuitem" onClick={() => { onMove(path, 1); setMenu(null); }}>Move Tab Right</button>
@@ -218,7 +222,7 @@ function TabSurface({ path, document, active, overlay = false, onSelect, onClose
       <FileText size={14} aria-hidden="true" />
       <span className="tab-title">{fileName(path)}</span>
       {document?.dirty && <span className="dirty-dot" aria-label="Unsaved changes" />}
-      {!overlay && (
+      {!overlay && onClose && (
         <button
           className="tab-close"
           onPointerDown={(event) => event.stopPropagation()}

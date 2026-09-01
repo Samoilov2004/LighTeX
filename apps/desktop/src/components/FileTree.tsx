@@ -16,16 +16,17 @@ interface FileTreeProps {
   onSetMain(path: string): void;
   onMove(path: string, destinationFolder: string): void;
   onReveal(path: string): void;
+  readOnly?: boolean;
 }
 
 export function FileTree(props: FileTreeProps) {
   return (
-    <div className="files-panel">
-      <div className="sidebar-actions" aria-label="File actions">
+    <div className={`files-panel ${props.readOnly ? "read-only" : ""}`}>
+      {!props.readOnly && <div className="sidebar-actions" aria-label="File actions">
         <button className="sidebar-action-button" onClick={() => props.onCreateFile("")} aria-label="Create file" title="Create file"><FilePlus2 size={14} /><span>File</span></button>
         <button className="sidebar-action-button" onClick={() => props.onCreateFolder("")} aria-label="Create folder" title="Create folder"><FolderPlus size={14} /><span>Folder</span></button>
         <button className="sidebar-action-button" onClick={() => props.onUpload("")} aria-label="Upload files or folder" title="Upload files or folder"><FolderUp size={14} /><span>Upload</span></button>
-      </div>
+      </div>}
       <div className="file-tree" role="tree" aria-label="Project files">
         {props.entries.map((entry) => <FileRow key={entry.relativePath} entry={entry} depth={0} {...props} />)}
       </div>
@@ -45,20 +46,20 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
         role="treeitem"
         aria-expanded={entry.isDirectory ? expanded : undefined}
         tabIndex={0}
-        draggable={!entry.isDirectory}
+        draggable={!props.readOnly && !entry.isDirectory}
         onDragStart={(event) => {
           event.dataTransfer.effectAllowed = "copyMove";
           event.dataTransfer.setData("application/x-lightex-file", entry.relativePath);
           event.dataTransfer.setData("application/x-lightex-entry", entry.relativePath);
         }}
         onDragOver={(event) => {
-          if (entry.isDirectory && event.dataTransfer.types.includes("application/x-lightex-entry")) {
+          if (!props.readOnly && entry.isDirectory && event.dataTransfer.types.includes("application/x-lightex-entry")) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
           }
         }}
         onDrop={(event) => {
-          if (!entry.isDirectory) return;
+          if (props.readOnly || !entry.isDirectory) return;
           const path = event.dataTransfer.getData("application/x-lightex-entry");
           if (path && path !== entry.relativePath && !entry.relativePath.startsWith(`${path}/`)) {
             event.preventDefault();
@@ -67,7 +68,7 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
         }}
         onDoubleClick={open}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") open(); }}
-        onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
+        onContextMenu={(event) => { if (!props.readOnly) { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); } }}
       >
         {entry.isDirectory
           ? expanded ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />
@@ -79,7 +80,7 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
       {entry.isDirectory && expanded && entry.children.map((child) => (
         <FileRow key={child.relativePath} entry={child} depth={depth + 1} {...props} />
       ))}
-      {menu && (
+      {menu && !props.readOnly && (
         <div className="popover-menu context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
           {entry.isDirectory && <>
             <button role="menuitem" onClick={() => { props.onCreateFile(entry.relativePath); setMenu(null); }}><FilePlus2 size={14} />New File</button>

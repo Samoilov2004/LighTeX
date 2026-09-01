@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Undo2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { events, isDesktop } from "./api";
 import { useAppStore } from "./store";
@@ -15,7 +15,14 @@ export default function App() {
   const settingsOpen = useAppStore((state) => state.settingsOpen);
   const error = useAppStore((state) => state.error);
   const closeRequest = useAppStore((state) => state.closeRequest);
+  const notice = useAppStore((state) => state.notice);
+  const undoVersion = useAppStore((state) => state.undoVersion);
   const initialized = useRef(false);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => useAppStore.setState({ notice: null }), undoVersion ? 8_000 : 4_000);
+    return () => window.clearTimeout(timer);
+  }, [notice, undoVersion?.id]);
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
@@ -103,6 +110,7 @@ export default function App() {
       {phase === "project" && <Workspace />}
       {settingsOpen && phase !== "setup" && <SettingsPanel onClose={() => useAppStore.setState({ settingsOpen: false })} />}
       {closeRequest && <UnsavedChangesDialog />}
+      {notice && <div className="success-toast" role="status"><CheckCircle2 size={16} aria-hidden="true" /><span>{notice}</span>{undoVersion && <button className="toast-action" onClick={() => void useAppStore.getState().undoLastRestore()}><Undo2 size={13} />Undo</button>}<button className="icon-button" onClick={() => useAppStore.setState({ notice: null })} aria-label="Dismiss notification"><X size={14} /></button></div>}
       {error && <div className="error-toast" role="alert"><AlertCircle size={16} /><span>{error}</span><button className="icon-button" onClick={() => useAppStore.getState().setError(null)} aria-label="Dismiss error"><X size={14} /></button></div>}
     </div>
   );

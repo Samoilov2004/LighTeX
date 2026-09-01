@@ -14,6 +14,7 @@ pub mod synctex;
 pub mod template;
 pub mod toolchain;
 pub mod update;
+pub mod version;
 
 pub use error::{CoreError, CoreResult};
 pub use models::*;
