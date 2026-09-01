@@ -23,6 +23,7 @@ import type {
 } from "./types";
 import { defaultConfig } from "./types";
 import { findExistingProjectPdf } from "./projectFiles";
+import { diagnosticTargetKey, firstBuildDiagnosticTarget } from "./buildDiagnostics";
 
 type AppPhase = "booting" | "setup" | "hub" | "project";
 export type SidebarMode = "files" | "search";
@@ -91,7 +92,6 @@ interface AppState {
   pdfVisible: boolean;
   settingsOpen: boolean;
   insertShelfOpen: boolean;
-  problemsOpen: boolean;
   outline: OutlineItem[];
   outlinePages: Record<string, number>;
   outlineExpanded: boolean;
@@ -171,7 +171,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   pdfVisible: true,
   settingsOpen: false,
   insertShelfOpen: false,
-  problemsOpen: false,
   outline: [],
   outlinePages: {},
   outlineExpanded: true,
@@ -195,7 +194,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const preview = new URLSearchParams(window.location.search).get("preview");
       if (preview === "workspace" || preview === "conflict" || preview === "problems" || preview === "versions" || preview === "version-readonly") {
         const main = previewDocument("main.tex", "\\documentclass[11pt]{article}\n\\usepackage{amsmath,amssymb}\n\\title{Spectral Methods for Elliptic Operators}\n\\author{A. Researcher}\n\\begin{document}\n\\maketitle\n\\section{Introduction}\nLet $A$ be a self-adjoint operator on a Hilbert space.\n\\section{Main Result}\n\\begin{equation}\n  \\lambda_k \\sim C k^{2/n}.\n\\end{equation}\n\\subsection{Proof Strategy}\nWe combine compactness with the min-max principle.\n\\end{document}\n");
-        const notes = previewDocument("sections/notes.tex", "\\section{Technical Notes}\nThe resolvent is compact.\n");
+        const notes = previewDocument(
+          "sections/notes.tex",
+          preview === "problems"
+            ? "\\section{Technical Notes}\n\\bagin{equation}\n  x^2 + y^2 = z^2\n\\end{equation}\n"
+            : "\\section{Technical Notes}\nThe resolvent is compact.\n",
+        );
         const previewEntries: ProjectEntry[] = [
           { name: "sections", relativePath: "sections", isDirectory: true, children: [{ name: "notes.tex", relativePath: "sections/notes.tex", isDirectory: false, children: [] }] },
           { name: "figures", relativePath: "figures", isDirectory: true, children: [] },
@@ -214,7 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           entries: previewEntries,
           documents: { "main.tex": main, "sections/notes.tex": notes },
           tabs: ["main.tex", "sections/notes.tex"],
-          selectedPath: "main.tex",
+          selectedPath: preview === "problems" ? "sections/notes.tex" : "main.tex",
           mainDocument: "main.tex",
           outline: [
             { relativePath: "main.tex", line: 7, title: "Introduction", level: 1 },
@@ -227,7 +231,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             "main.tex:13:Proof Strategy": 2,
           },
           buildState: preview === "problems" ? "failure" : "idle",
-          problemsOpen: preview === "problems",
           versions: savedVersions,
           versionsOpen: preview === "versions",
           versionPreview: preview === "version-readonly" ? {
@@ -264,13 +267,34 @@ export const useAppStore = create<AppState>((set, get) => ({
           } : null,
           buildResult: preview === "problems" ? {
             succeeded: false,
-            log: "main.tex:10: Undefined control sequence.\n",
+            log: [
+              "This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026)",
+              " restricted \\write18 enabled.",
+              "entering extended mode",
+              "(./main.tex",
+              "LaTeX2e <2026-06-01> patch level 1",
+              "L3 programming layer <2026-05-20>",
+              "(/usr/local/texlive/2026/texmf-dist/tex/latex/base/article.cls",
+              "Document Class: article 2026/01/12 v1.4 Standard LaTeX document class",
+              "(/usr/local/texlive/2026/texmf-dist/tex/latex/base/size11.clo))",
+              "(/usr/local/texlive/2026/texmf-dist/tex/latex/amsmath/amsmath.sty)",
+              "(/usr/local/texlive/2026/texmf-dist/tex/latex/amsfonts/amssymb.sty)",
+              "No file main.aux.",
+              "...",
+              "! Undefined control sequence.",
+              "(./sections/notes.tex",
+              "l.2 \\bagin{equation}",
+              "?",
+              "! Emergency stop.",
+              "l.2 \\bagin{equation}",
+              "...",
+            ].join("\n"),
             previewPdfPath: null,
             projectPdfPath: null,
             missingPackageFile: null,
-            diagnostics: [{ primary: { severity: "error", relativePath: "main.tex", line: 10, message: "Undefined control sequence. Check the command spelling or required package." }, related: [{ severity: "error", relativePath: null, line: null, message: "Compilation stopped at the first error." }] }],
+            diagnostics: [{ primary: { severity: "error", relativePath: "sections/notes.tex", line: 2, message: "Undefined control sequence. Check the command spelling or required package." }, related: [{ severity: "error", relativePath: null, line: null, message: "Compilation stopped at the first error." }] }],
           } : null,
-          statusMessage: "Browser preview",
+          statusMessage: preview === "problems" ? "Build failed · 1 problem" : "Browser preview",
         });
       } else if (preview === "setup") {
         set({
@@ -649,6 +673,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async build() {
+    window.clearTimeout(buildTimer);
+    buildTimer = undefined;
     const { project, mainDocument, activeToolchain, config } = get();
     if (!project || !mainDocument || get().buildState === "building") return;
     if (Object.values(get().documents).some((document) => document.externalChange !== "none")) {
@@ -667,6 +693,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: `The selected build tool is unavailable: ${config.buildTool === "latexmk" ? "latexmk" : engineName}` });
       return;
     }
+    const previousTarget = firstBuildDiagnosticTarget(get().buildResult, get().entries);
     set({ buildState: "building", statusMessage: "Compiling…", error: null });
     try {
       const result = await api.build({
@@ -684,13 +711,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         pdfBase64,
         outlinePages: result.succeeded ? {} : get().outlinePages,
         buildState: result.succeeded ? "success" : "failure",
-        statusMessage: result.succeeded ? "Build succeeded" : "Build failed",
-        problemsOpen: !result.succeeded && config.showProblemsOnFailure,
+        statusMessage: result.succeeded
+          ? "Build succeeded"
+          : `Build failed · ${result.diagnostics.length} problem${result.diagnostics.length === 1 ? "" : "s"}`,
       });
+      const target = firstBuildDiagnosticTarget(result, get().entries);
+      if (!result.succeeded && target && diagnosticTargetKey(target) !== diagnosticTargetKey(previousTarget)) {
+        set({ sidebarMode: "files", sidebarVisible: true });
+        await get().openDocument(target.relativePath, target.line);
+      }
     } catch (error) {
       const message = String(error);
       if (message.toLowerCase().includes("cancel")) set({ buildState: "idle", statusMessage: "Build cancelled" });
-      else set({ buildState: "failure", statusMessage: "Build failed", error: message, problemsOpen: true });
+      else set({ buildState: "failure", statusMessage: "Build failed", error: message });
     }
   },
 
@@ -879,7 +912,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           fileDiffs,
         },
         insertShelfOpen: false,
-        problemsOpen: false,
         statusMessage: `Previewing ${version.name}`,
       });
       if (version.previewStatus === "notBuilt" || version.previewStatus === "failed") {

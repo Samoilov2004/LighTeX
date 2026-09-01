@@ -6,6 +6,8 @@ export type { BuildDiagnosticGroup } from "../../../crates/lightex-core/bindings
 export type { BuildRequest } from "../../../crates/lightex-core/bindings/BuildRequest";
 export type { BuildResult } from "../../../crates/lightex-core/bindings/BuildResult";
 export type { BuildTool } from "../../../crates/lightex-core/bindings/BuildTool";
+export type { BundledTemplateCategory } from "../../../crates/lightex-core/bindings/BundledTemplateCategory";
+export type { BundledTemplateManifestV2 } from "../../../crates/lightex-core/bindings/BundledTemplateManifestV2";
 export type { DocumentRevision } from "../../../crates/lightex-core/bindings/DocumentRevision";
 export type { DocumentSnapshot } from "../../../crates/lightex-core/bindings/DocumentSnapshot";
 export type { InstalledRuntime } from "../../../crates/lightex-core/bindings/InstalledRuntime";
@@ -38,6 +40,9 @@ export type { SyncTeXPdfTarget } from "../../../crates/lightex-core/bindings/Syn
 export type { SyncTeXSourceTarget } from "../../../crates/lightex-core/bindings/SyncTeXSourceTarget";
 export type { TeXProvider } from "../../../crates/lightex-core/bindings/TeXProvider";
 export type { TemplateReview } from "../../../crates/lightex-core/bindings/TemplateReview";
+export type { TemplateCodeLanguage } from "../../../crates/lightex-core/bindings/TemplateCodeLanguage";
+export type { TemplateCodeStyle } from "../../../crates/lightex-core/bindings/TemplateCodeStyle";
+export type { TemplateInstantiationOptions } from "../../../crates/lightex-core/bindings/TemplateInstantiationOptions";
 export type { ToolExecutable } from "../../../crates/lightex-core/bindings/ToolExecutable";
 export type { ToolchainStatus } from "../../../crates/lightex-core/bindings/ToolchainStatus";
 export type { VersionChangeSummary } from "../../../crates/lightex-core/bindings/VersionChangeSummary";

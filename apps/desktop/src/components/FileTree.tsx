@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FilePlus2, FileText, Folder, FolderPlus, FolderUp, Pencil, Star, Trash2 } from "lucide-react";
 import type { ProjectEntry } from "../types";
 
@@ -16,6 +16,7 @@ interface FileTreeProps {
   onSetMain(path: string): void;
   onMove(path: string, destinationFolder: string): void;
   onReveal(path: string): void;
+  errorPaths?: ReadonlySet<string>;
   readOnly?: boolean;
 }
 
@@ -38,6 +39,12 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
   const [expanded, setExpanded] = useState(depth < 1);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const open = () => entry.isDirectory ? setExpanded(!expanded) : props.onOpen(entry.relativePath);
+  const hasBuildError = props.errorPaths?.has(entry.relativePath) ?? false;
+
+  useEffect(() => {
+    if (entry.isDirectory && hasBuildError) setExpanded(true);
+  }, [entry.isDirectory, hasBuildError]);
+
   return (
     <>
       <div
@@ -76,6 +83,12 @@ function FileRow({ entry, depth, ...props }: { entry: ProjectEntry; depth: numbe
         {entry.isDirectory ? <Folder size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
         <button className="file-name-button" onClick={open} title={entry.relativePath}>{entry.name}</button>
         {entry.relativePath === props.mainDocument && <span className="main-label">MAIN</span>}
+        {hasBuildError && <span
+          className="file-error-indicator"
+          role="img"
+          aria-label={entry.isDirectory ? `Contains build errors in ${entry.name}` : `Build error in ${entry.name}`}
+          title={entry.isDirectory ? "Contains build errors" : "Build error"}
+        />}
       </div>
       {entry.isDirectory && expanded && entry.children.map((child) => (
         <FileRow key={child.relativePath} entry={child} depth={depth + 1} {...props} />

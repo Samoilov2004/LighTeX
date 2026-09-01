@@ -105,7 +105,6 @@ export function SettingsPanel({ onClose }: { onClose(): void }) {
               <label className="settings-field"><span>Build tool</span><select value={config.buildTool} onChange={(event) => update({ buildTool: event.target.value as BuildTool })}><option value="latexmk">latexmk</option><option value="directCompiler">Direct compiler</option></select></label>
               <CheckRow label="Auto Compile" checked={config.automaticBuilds} onChange={(value) => update({ automaticBuilds: value })} />
               <label className="settings-field"><span>Compile after</span><select value={config.automaticBuildDelaySeconds} onChange={(event) => update({ automaticBuildDelaySeconds: Number(event.target.value) })}>{[2, 5, 10].map((seconds) => <option key={seconds} value={seconds}>{seconds} seconds</option>)}</select></label>
-              <CheckRow label="Show Problems when a build fails" checked={config.showProblemsOnFailure} onChange={(value) => update({ showProblemsOnFailure: value })} />
             </SettingsSection>
             <SettingsSection title="TeX source">
               {Object.keys(system.engines).length > 0 && <button className={`runtime-row ${config.texProvider === "system" ? "active" : ""}`} onClick={chooseSystem}><HardDrive size={16} /><span><strong>System TeX</strong><small>{Object.keys(system.engines).map(engineLabelFromPath).join(", ")}</small></span>{config.texProvider === "system" && <Check size={15} />}</button>}

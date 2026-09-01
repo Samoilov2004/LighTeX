@@ -1,4 +1,6 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import { acceptCompletion, autocompletion, closeBrackets, completionKeymap, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyField, historyKeymap, indentWithTab, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
@@ -6,7 +8,9 @@ import { searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, StateField } from "@codemirror/state";
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, dropCursor, gutter, highlightSpecialChars, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import type { AppConfigV1, ProjectCompletionIndex, VersionDiffLine, VersionFileDiff } from "../types";
+import { CircleX, TriangleAlert } from "lucide-react";
+import type { AppConfigV1, BuildDiagnosticGroup, ProjectCompletionIndex, VersionDiffLine, VersionFileDiff } from "../types";
+import { BuildLogPopover, type BuildLogAnchor } from "./BuildLogPopover";
 
 interface SourceEditorProps {
   path: string;
@@ -18,6 +22,8 @@ interface SourceEditorProps {
   onUndoAvailabilityChange?(canUndo: boolean): void;
   readOnly?: boolean;
   diff?: VersionFileDiff | null;
+  diagnostics?: BuildDiagnosticGroup[];
+  buildLog?: string;
 }
 
 export interface SourceEditorHandle {
@@ -26,6 +32,7 @@ export interface SourceEditorHandle {
 }
 
 const settingsCompartment = new Compartment();
+const diagnosticsCompartment = new Compartment();
 const cachedEditorStates = new Map<string, unknown>();
 const maximumCachedEditorStates = 40;
 
@@ -51,13 +58,15 @@ const latexHighlight = HighlightStyle.define([
   { tag: tags.number, color: "#005cc5" },
 ]);
 
-export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(function SourceEditor({ path, historyKey, value, config, completion, onChange, onUndoAvailabilityChange, readOnly = false, diff = null }, ref) {
+export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(function SourceEditor({ path, historyKey, value, config, completion, onChange, onUndoAvailabilityChange, readOnly = false, diff = null, diagnostics = [], buildLog = "" }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const applyingExternal = useRef(false);
+  const [logAnchor, setLogAnchor] = useState<BuildLogAnchor | null>(null);
   const onChangeRef = useRef(onChange);
   const completionRef = useRef(completion);
   const onUndoAvailabilityChangeRef = useRef(onUndoAvailabilityChange);
+  const diagnosticSignature = diagnostics.map((group) => `${group.primary.severity}:${group.primary.line}:${group.primary.message}`).join("|");
   onChangeRef.current = onChange;
   completionRef.current = completion;
   onUndoAvailabilityChangeRef.current = onUndoAvailabilityChange;
@@ -97,6 +106,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
       ]),
       settingsCompartment.of(editorSettings(config)),
       diffExtension(diff),
+      diagnosticsCompartment.of(diagnosticsExtension(diagnostics)),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !applyingExternal.current) {
           onChangeRef.current(update.state.doc.toString());
@@ -160,6 +170,23 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
   useEffect(() => {
     const editor = view.current;
     if (!editor) return;
+    editor.dispatch({ effects: diagnosticsCompartment.reconfigure(diagnosticsExtension(diagnostics)) });
+    setLogAnchor(null);
+  }, [diagnosticSignature, buildLog]);
+
+  useEffect(() => {
+    const toggle = (event: Event) => {
+      const detail = (event as CustomEvent<{ path: string; trigger: HTMLElement; rect: BuildLogAnchor["rect"] }>).detail;
+      if (detail.path !== path) return;
+      setLogAnchor((current) => current ? null : { trigger: detail.trigger, rect: detail.rect });
+    };
+    window.addEventListener("lightex:toggle-build-log", toggle);
+    return () => window.removeEventListener("lightex:toggle-build-log", toggle);
+  }, [path]);
+
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
     editor.dispatch({ effects: settingsCompartment.reconfigure(editorSettings(config)) });
   }, [config.editorFontSize, config.tabWidth, config.showLineNumbers, config.wordWrap, config.autoCloseBrackets]);
 
@@ -171,8 +198,164 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(fu
     applyingExternal.current = false;
   }, [value]);
 
-  return <div className={`source-editor ${readOnly ? "read-only" : ""} ${diff?.lines.length ? "has-version-diff" : ""}`} ref={host} data-testid="source-editor" />;
+  const closeLog = useCallback((restoreFocus = false) => {
+    setLogAnchor((current) => {
+      if (restoreFocus) current?.trigger.focus({ preventScroll: true });
+      return null;
+    });
+  }, []);
+
+  return <>
+    <div className={`source-editor ${readOnly ? "read-only" : ""} ${diff?.lines.length ? "has-version-diff" : ""}`} ref={host} data-testid="source-editor" />
+    {logAnchor && createPortal(<BuildLogPopover anchor={logAnchor} log={buildLog} failed={diagnostics.some((group) => group.primary.severity === "error")} onClose={closeLog} />, document.body)}
+  </>;
 });
+
+const diagnosticRoots = new WeakMap<HTMLElement, Root>();
+
+class InlineDiagnosticWidget extends WidgetType {
+  constructor(readonly path: string, readonly diagnostic: BuildDiagnosticGroup["primary"]) {
+    super();
+  }
+
+  eq(other: InlineDiagnosticWidget) {
+    return this.path === other.path
+      && this.diagnostic.severity === other.diagnostic.severity
+      && this.diagnostic.line === other.diagnostic.line
+      && this.diagnostic.message === other.diagnostic.message;
+  }
+
+  toDOM() {
+    const host = document.createElement("div");
+    host.className = "cm-inline-diagnostic-host";
+    const root = createRoot(host);
+    diagnosticRoots.set(host, root);
+    root.render(<InlineDiagnosticRow path={this.path} diagnostic={this.diagnostic} />);
+    return host;
+  }
+
+  destroy(dom: HTMLElement) {
+    scheduleDiagnosticRootUnmount(dom);
+    diagnosticRoots.delete(dom);
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+function InlineDiagnosticRow({ path, diagnostic }: { path: string; diagnostic: BuildDiagnosticGroup["primary"] }) {
+  const Icon = diagnostic.severity === "error" ? CircleX : TriangleAlert;
+  const copy = diagnosticCopy(diagnostic.message);
+  const toggleLog = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const trigger = event.currentTarget;
+    const rect = trigger.getBoundingClientRect();
+    window.dispatchEvent(new CustomEvent("lightex:toggle-build-log", {
+      detail: {
+        path,
+        trigger,
+        rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height },
+      },
+    }));
+  };
+  return <div className={`cm-inline-diagnostic ${diagnostic.severity}`} role="alert">
+    <Icon size={13} aria-hidden="true" />
+    <strong>{copy.title}</strong>
+    {copy.detail && <span>{copy.detail}</span>}
+    <button type="button" className="cm-diagnostic-open-log" onMouseDown={(event) => event.preventDefault()} onClick={toggleLog}>Open Log</button>
+  </div>;
+}
+
+class DiagnosticGutterMarker extends GutterMarker {
+  constructor(readonly severity: BuildDiagnosticGroup["primary"]["severity"]) {
+    super();
+  }
+
+  eq(other: DiagnosticGutterMarker) {
+    return this.severity === other.severity;
+  }
+
+  toDOM() {
+    const host = document.createElement("span");
+    host.className = `cm-diagnostic-gutter-marker ${this.severity}`;
+    const root = createRoot(host);
+    diagnosticRoots.set(host, root);
+    const Icon = this.severity === "error" ? CircleX : TriangleAlert;
+    root.render(<Icon size={12} aria-hidden="true" />);
+    return host;
+  }
+
+  destroy(dom: HTMLElement) {
+    scheduleDiagnosticRootUnmount(dom);
+    diagnosticRoots.delete(dom);
+  }
+}
+
+function scheduleDiagnosticRootUnmount(dom: HTMLElement) {
+  const root = diagnosticRoots.get(dom);
+  if (root) window.queueMicrotask(() => root.unmount());
+}
+
+function diagnosticsExtension(groups: BuildDiagnosticGroup[]) {
+  const visible = groups.filter((group) => group.primary.line && group.primary.line > 0);
+  if (visible.length === 0) return [];
+  const field = StateField.define<DecorationSet>({
+    create(state) {
+      return diagnosticDecorations(state, visible);
+    },
+    update(decorations, transaction) {
+      return transaction.docChanged ? diagnosticDecorations(transaction.state, visible) : decorations;
+    },
+    provide: (value) => EditorView.decorations.from(value),
+  });
+  const markers = new Map<number, DiagnosticGutterMarker>();
+  for (const group of visible) {
+    const line = group.primary.line!;
+    const current = markers.get(line);
+    if (!current || group.primary.severity === "error") markers.set(line, new DiagnosticGutterMarker(group.primary.severity));
+  }
+  return [
+    field,
+    gutter({
+      class: "cm-diagnostic-gutter",
+      lineMarker(view, block) {
+        return markers.get(view.state.doc.lineAt(block.from).number) ?? null;
+      },
+    }),
+  ];
+}
+
+function diagnosticDecorations(state: EditorState, groups: BuildDiagnosticGroup[]) {
+  const ranges = groups.flatMap((group) => {
+    const lineNumber = Math.max(1, Math.min(group.primary.line ?? 1, state.doc.lines));
+    const line = state.doc.line(lineNumber);
+    const text = state.sliceDoc(line.from, line.to);
+    const command = /\\[A-Za-z@]+\*?/.exec(text);
+    const firstContent = text.search(/\S/);
+    const underlineFrom = command ? line.from + command.index : line.from + Math.max(0, firstContent);
+    const underlineTo = command ? underlineFrom + command[0].length : line.to;
+    const result = [];
+    if (underlineTo > underlineFrom) {
+      result.push(Decoration.mark({ class: `cm-diagnostic-range ${group.primary.severity}` }).range(underlineFrom, underlineTo));
+    }
+    result.push(Decoration.widget({
+      widget: new InlineDiagnosticWidget(group.primary.relativePath ?? "", group.primary),
+      block: true,
+      side: 1,
+    }).range(line.to));
+    return result;
+  });
+  return Decoration.set(ranges, true);
+}
+
+function diagnosticCopy(message: string) {
+  const clean = message.trim();
+  const firstSentence = /^(.+?)[.!?](?:\s+(.+))?$/.exec(clean);
+  if (!firstSentence?.[2]) return { title: clean.replace(/[.]$/, ""), detail: "" };
+  return { title: firstSentence[1], detail: firstSentence[2] };
+}
 
 class DeletedLineWidget extends WidgetType {
   constructor(readonly line: VersionDiffLine) {

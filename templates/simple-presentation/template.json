@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "simple-presentation",
   "name": "Simple Presentation",
   "description": "A clean 16:9 Beamer deck with large type and a restrained color palette.",
-  "category": "presentation",
+  "category": "slides",
+  "sortOrder": 60,
   "engine": "xelatex",
   "entry": "main.tex",
   "preview": "preview.png",

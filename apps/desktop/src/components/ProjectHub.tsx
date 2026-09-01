@@ -1,57 +1,88 @@
-import { useEffect, useState } from "react";
-import { FilePlus2, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, FilePlus2, Folder, FolderOpen, LayoutTemplate, Settings, Trash2 } from "lucide-react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { desktopDir } from "@tauri-apps/api/path";
 import { api, isDesktop } from "../api";
+import { fallbackBundledTemplatePreview, fallbackBundledTemplates } from "../bundledTemplates";
 import { useAppStore } from "../store";
-import type { LatexEngine, PersonalTemplateManifestV2, TemplateReview } from "../types";
+import type {
+  BundledTemplateCategory,
+  BundledTemplateManifestV2,
+  PersonalTemplateManifestV2,
+  TemplateCodeLanguage,
+  TemplateCodeStyle,
+  TemplateInstantiationOptions,
+  TemplateReview,
+} from "../types";
 import { renderFirstPagePreview } from "../pdf";
 import { useModalFocus } from "../useModalFocus";
 import appIcon from "../assets/AppIcon128.png";
-import blankDocumentPreview from "../../../../templates/blank-document/preview.png";
-import homeworkPreview from "../../../../templates/homework/preview.png";
-import labReportPreview from "../../../../templates/lab-report/preview.png";
-import mathNotesPreview from "../../../../templates/math-notes/preview.png";
-import scientificArticlePreview from "../../../../templates/scientific-article/preview.png";
-import simplePresentationPreview from "../../../../templates/simple-presentation/preview.png";
-import { BackToProjectsControl } from "./BackToProjectsControl";
 import { WindowDragRegion } from "./WindowDragRegion";
 
-interface TemplateDefinition {
-  id: string;
+type HubScreen =
+  | { kind: "projects" }
+  | { kind: "templateDetail"; template: TemplateSelection };
+
+type TemplateSelection =
+  | { kind: "bundled"; template: BundledTemplateManifestV2 }
+  | { kind: "personal"; template: PersonalTemplateManifestV2 };
+
+interface TemplateDraft {
   name: string;
-  summary: string;
-  kind: string;
-  preview: string;
-  engine: LatexEngine;
+  parent: string;
+  codeStyle: TemplateCodeStyle;
+  codeLanguages: TemplateCodeLanguage[];
 }
 
-const templates: TemplateDefinition[] = [
-  { id: "blank-document", name: "Blank Document", summary: "A minimal article with clean typography and generous margins.", kind: "General", preview: blankDocumentPreview, engine: "xeLaTex" },
-  { id: "homework", name: "Homework Assignment", summary: "A compact problem set with consistent problem and solution blocks.", kind: "Homework", preview: homeworkPreview, engine: "xeLaTex" },
-  { id: "lab-report", name: "Laboratory Report", summary: "A multi-file experimental report with methods, results, tables, and conclusions.", kind: "Lab", preview: labReportPreview, engine: "xeLaTex" },
-  { id: "math-notes", name: "Mathematical Notes", summary: "Chapter-based notes with definitions, theorems, proofs, problems, and solutions.", kind: "Math", preview: mathNotesPreview, engine: "xeLaTex" },
-  { id: "scientific-article", name: "Scientific Article", summary: "A research article with an abstract, numbered sections, tables, and BibLaTeX references.", kind: "Academic", preview: scientificArticlePreview, engine: "xeLaTex" },
-  { id: "simple-presentation", name: "Simple Presentation", summary: "A clean 16:9 Beamer deck with large type and a restrained color palette.", kind: "Slides", preview: simplePresentationPreview, engine: "xeLaTex" },
-];
+const categoryLabels: Record<BundledTemplateCategory, string> = {
+  essentials: "Essentials",
+  academic: "Academic",
+  slides: "Slides",
+};
+
+const codeLanguageLabels: Record<TemplateCodeLanguage, string> = {
+  python: "Python",
+  sql: "SQL",
+  cpp: "C/C++",
+  javaScript: "JavaScript / TypeScript",
+  rust: "Rust",
+  java: "Java",
+  shell: "Shell",
+};
+
+const previewCache = new Map<string, string>();
 
 export function ProjectHub() {
   const config = useAppStore((state) => state.config);
   const openProject = useAppStore((state) => state.openProjectPath);
   const updateConfig = useAppStore((state) => state.updateConfig);
-  const [create, setCreate] = useState<{ template: string; title: string } | null>(null);
+  const [createEmpty, setCreateEmpty] = useState(false);
   const [personal, setPersonal] = useState<PersonalTemplateManifestV2[]>([]);
+  const [bundled, setBundled] = useState<BundledTemplateManifestV2[]>(fallbackBundledTemplates);
   const [review, setReview] = useState<TemplateReview | null>(null);
   const [hubError, setHubError] = useState<string | null>(null);
-  const [screen, setScreen] = useState<"projects" | "templates">("projects");
+  const [screen, setScreen] = useState<HubScreen>({ kind: "projects" });
+  const [desktop, setDesktop] = useState(isDesktop() ? "" : "/Users/Preview/Desktop");
+  const [drafts, setDrafts] = useState<Record<string, TemplateDraft>>({});
+
   useEffect(() => {
-    if (isDesktop()) void api.listPersonalTemplates().then(setPersonal).catch((error) => setHubError(String(error)));
+    if (!isDesktop()) return;
+    void api.listPersonalTemplates().then(setPersonal).catch((error) => setHubError(String(error)));
+    void api.listBundledTemplates().then(setBundled).catch((error) => setHubError(String(error)));
+    void desktopDir().then((path) => {
+      setDesktop(path);
+      setDrafts((current) => Object.fromEntries(
+        Object.entries(current).map(([key, draft]) => [key, draft.parent ? draft : { ...draft, parent: path }]),
+      ));
+    }).catch(() => {});
   }, []);
+
   const chooseFolder = async () => {
     if (!isDesktop()) return;
     const selected = await open({ directory: true, multiple: false, title: "Open LaTeX Project" });
     if (typeof selected === "string") await openProject(selected);
   };
+
   const clearRecent = async () => {
     const confirmed = await ask("Remove all recent projects from LighTex? The project folders and every local file will remain on your Mac or Linux computer.", {
       title: "Clear Recent Projects",
@@ -61,14 +92,16 @@ export function ProjectHub() {
     });
     if (confirmed) await updateConfig({ recentProjects: [] });
   };
+
   const reviewTemplate = async () => {
     const selected = await open({ directory: true, multiple: false, title: "Choose a Project to Save as a Template" });
     if (typeof selected !== "string") return;
     try { setReview(await api.templateReview(selected)); }
     catch (error) { setHubError(String(error)); }
   };
+
   const removeTemplate = async (template: PersonalTemplateManifestV2) => {
-    const confirmed = await ask(`Move the personal template “${template.name}” to Trash? Projects already created from it are not affected.`, {
+    const confirmed = await ask("Move the personal template “" + template.name + "” to Trash? Projects already created from it are not affected.", {
       title: "Remove Personal Template",
       kind: "warning",
       okLabel: "Move to Trash",
@@ -78,29 +111,84 @@ export function ProjectHub() {
     try {
       await api.removePersonalTemplate(template.id);
       setPersonal(await api.listPersonalTemplates());
+      if (screen.kind === "templateDetail" && screen.template.kind === "personal" && screen.template.template.id === template.id) {
+        const fallback = bundled.find((item) => item.id === "course-notes") ?? bundled[0];
+        if (fallback) selectTemplate({ kind: "bundled", template: fallback });
+        else setScreen({ kind: "projects" });
+      }
     } catch (error) { setHubError(String(error)); }
   };
+
+  const selectTemplate = (selection: TemplateSelection) => {
+    const key = templateKey(selection);
+    setDrafts((current) => current[key] ? current : {
+      ...current,
+      [key]: createDraft(selection, desktop),
+    });
+    setScreen({ kind: "templateDetail", template: selection });
+  };
+
+  const showTemplateBuilder = () => {
+    const template = bundled.find((item) => item.id === "course-notes") ?? bundled[0];
+    if (template) selectTemplate({ kind: "bundled", template });
+    else if (personal[0]) selectTemplate({ kind: "personal", template: personal[0] });
+    else setHubError("No templates are available.");
+  };
+
   useEffect(() => {
     const menu = (event: Event) => {
       const action = (event as CustomEvent<string>).detail;
-      if (action === "new-project") setCreate({ template: "empty", title: "New Empty Project" });
+      if (action === "new-project") setCreateEmpty(true);
       if (action === "open-project") void chooseFolder();
     };
     window.addEventListener("lightex:menu-action", menu);
     return () => window.removeEventListener("lightex:menu-action", menu);
   }, []);
+
+  const detailSelection = screen.kind === "templateDetail" ? screen.template : null;
+  const detailKey = detailSelection ? templateKey(detailSelection) : null;
+  const detailDraft = detailKey && detailSelection
+    ? drafts[detailKey] ?? createDraft(detailSelection, desktop)
+    : null;
+
   return (
-    <main className="hub-view">
+    <main className={"hub-view " + (screen.kind === "templateDetail" ? "template-detail-view" : "")}>
       <div className="hub-toolbar">
-        {screen === "templates" && <BackToProjectsControl onBack={() => setScreen("projects")} />}
         <WindowDragRegion />
+        {screen.kind === "templateDetail" && <strong className="hub-toolbar-title">New from Template</strong>}
         <button className="icon-button" onClick={() => useAppStore.setState({ settingsOpen: true })} aria-label="Open Settings" title="Settings"><Settings size={16} /></button>
       </div>
-      {screen === "projects" ? <ProjectsScreen config={config} openProject={openProject} chooseFolder={chooseFolder} clearRecent={clearRecent} onNewEmpty={() => setCreate({ template: "empty", title: "New Empty Project" })} onShowTemplates={() => setScreen("templates")} /> :
-        <TemplatesScreen personal={personal} onReviewTemplate={reviewTemplate} onRemoveTemplate={removeTemplate} onCreate={(template, title) => setCreate({ template, title })} />}
-      {create && <CreateProjectDialog template={create.template} title={create.title} onClose={() => setCreate(null)} onCreated={openProject} />}
-      {review && <TemplateReviewDialog review={review} onClose={() => setReview(null)} onCreated={async () => { setReview(null); setPersonal(await api.listPersonalTemplates()); }} />}
-      {hubError && <div className="error-toast" role="alert">{hubError}<button className="icon-button" onClick={() => setHubError(null)} aria-label="Dismiss error">×</button></div>}
+      {screen.kind === "projects" && (
+        <ProjectsScreen
+          config={config}
+          openProject={openProject}
+          chooseFolder={chooseFolder}
+          clearRecent={clearRecent}
+          onNewEmpty={() => setCreateEmpty(true)}
+          onShowTemplates={showTemplateBuilder}
+        />
+      )}
+      {detailSelection && detailDraft && detailKey && (
+        <TemplateDetailScreen
+          selection={detailSelection}
+          draft={detailDraft}
+          bundled={bundled}
+          personal={personal}
+          onChange={(next) => setDrafts((current) => ({ ...current, [detailKey]: next }))}
+          onBack={() => setScreen({ kind: "projects" })}
+          onSelect={selectTemplate}
+          onReviewTemplate={reviewTemplate}
+          onRemoveTemplate={removeTemplate}
+          onCreated={openProject}
+          onError={setHubError}
+        />
+      )}
+      {createEmpty && <CreateEmptyProjectDialog onClose={() => setCreateEmpty(false)} onCreated={openProject} />}
+      {review && <TemplateReviewDialog review={review} onClose={() => setReview(null)} onCreated={async () => {
+        setReview(null);
+        setPersonal(await api.listPersonalTemplates());
+      }} />}
+      {hubError && <div className="error-toast" role="alert"><span>{hubError}</span><button className="icon-button" onClick={() => setHubError(null)} aria-label="Dismiss error">×</button></div>}
     </main>
   );
 }
@@ -137,31 +225,204 @@ function ProjectsScreen({ config, openProject, chooseFolder, clearRecent, onNewE
   </div>;
 }
 
-function TemplatesScreen({ personal, onReviewTemplate, onRemoveTemplate, onCreate }: {
+function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, onBack, onSelect, onReviewTemplate, onRemoveTemplate, onCreated, onError }: {
+  selection: TemplateSelection;
+  draft: TemplateDraft;
+  bundled: BundledTemplateManifestV2[];
   personal: PersonalTemplateManifestV2[];
+  onChange(draft: TemplateDraft): void;
+  onBack(): void;
+  onSelect(selection: TemplateSelection): void;
   onReviewTemplate(): Promise<void>;
   onRemoveTemplate(template: PersonalTemplateManifestV2): Promise<void>;
-  onCreate(template: string, title: string): void;
+  onCreated(path: string): Promise<void>;
+  onError(error: string): void;
 }) {
-  return <div className="hub-content templates-content">
-    <header className="templates-heading"><h1>Templates</h1><p>Start a new project from a reusable layout.</p></header>
-    <section className="templates-section" aria-labelledby="personal-templates-heading">
-      <div className="section-heading"><h2 id="personal-templates-heading">Yours</h2></div>
-      {personal.length === 0 ? <div className="personal-template-empty"><LayoutTemplate size={21} /><span><strong>No personal templates yet</strong><small>Save one of your projects here to reuse it later.</small></span><button className="secondary-button" onClick={() => void onReviewTemplate()}>Create Template</button></div> : <>
-        <div className="personal-template-actions"><button className="secondary-button" onClick={() => void onReviewTemplate()}><FilePlus2 size={14} />Create Template</button></div>
-        <div className="template-grid personal-grid">{personal.map((template) => <div className="template-card personal-template-card" key={template.id}>
-          <button className="template-open" onClick={() => onCreate(`personal:${template.id}`, `New ${template.name}`)}><PersonalTemplatePreview template={template} /><span><strong>{template.name}</strong><small>{template.mainDocument ?? "Project template"}</small></span></button>
-          <button className="icon-button template-delete" aria-label={`Remove ${template.name}`} onClick={() => void onRemoveTemplate(template)}><Trash2 size={13} /></button>
-        </div>)}</div>
-      </>}
-      <div className="section-heading bundled"><h2>LighTex Templates</h2></div>
-      <div className="template-grid">{templates.map((template) => <button className="template-card" key={template.id} onClick={() => onCreate(template.id, `New ${template.name}`)}><TemplatePreview kind={template.kind} preview={template.preview} name={template.name} /><span><strong>{template.name}</strong><small>{template.summary}</small></span></button>)}</div>
+  const [creating, setCreating] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"readable" | "fullPage">("readable");
+  const rail = useRef<HTMLDivElement>(null);
+  const templateId = selection.template.id;
+  const templateName = selection.template.name;
+  const configurable = selection.kind === "bundled" && selection.template.codeStyles.length > 0;
+  const codeStyle = configurable ? draft.codeStyle : null;
+  const railSelections: TemplateSelection[] = [
+    ...personal.map((template) => ({ kind: "personal" as const, template })),
+    ...bundled.map((template) => ({ kind: "bundled" as const, template })),
+  ];
+  const fileSummary = selection.kind === "bundled" && selection.template.id === "course-notes"
+    ? "main.tex · notes.sty · latexmkrc · Makefile"
+    : selection.kind === "bundled"
+      ? selection.template.entry
+      : selection.template.mainDocument ?? "Project template";
+
+  const chooseLocation = async () => {
+    if (!isDesktop()) return;
+    const selected = await open({ directory: true, multiple: false, title: "Choose Project Location", defaultPath: draft.parent || undefined });
+    if (typeof selected === "string") onChange({ ...draft, parent: selected });
+  };
+
+  const submit = async () => {
+    if (!draft.name.trim() || !draft.parent || creating) return;
+    setCreating(true);
+    try {
+      let path: string;
+      if (selection.kind === "personal") {
+        path = await api.createProjectFromPersonalTemplate(selection.template.id, draft.parent, draft.name.trim());
+      } else {
+        const options: TemplateInstantiationOptions | null = configurable ? {
+          codeStyle: draft.codeStyle,
+          codeLanguages: draft.codeStyle === "none" ? [] : draft.codeLanguages,
+        } : null;
+        await useAppStore.getState().updateConfig({ latexEngine: selection.template.engine });
+        path = await api.createProjectFromTemplate(draft.parent, draft.name.trim(), selection.template.id, options);
+      }
+      await onCreated(path);
+    } catch (error) {
+      onError(String(error));
+      setCreating(false);
+    }
+  };
+
+  return <div className="template-detail">
+    <section className="template-detail-preview-column" aria-label={templateName + " preview and template selection"}>
+      <div className="template-preview-mode" role="group" aria-label="Preview size">
+        <button type="button" className={previewMode === "readable" ? "selected" : ""} aria-pressed={previewMode === "readable"} onClick={() => setPreviewMode("readable")}>Readable</button>
+        <button type="button" className={previewMode === "fullPage" ? "selected" : ""} aria-pressed={previewMode === "fullPage"} onClick={() => setPreviewMode("fullPage")}>Full Page</button>
+      </div>
+      <div className={"template-document-preview " + previewMode}>
+        <div className="template-document-page">
+          {selection.kind === "bundled"
+            ? <BundledTemplateImage template={selection.template} style={codeStyle} />
+            : <PersonalTemplateImage template={selection.template} />}
+        </div>
+        <div className="template-preview-pager" aria-label="Template preview page">
+          <button className="icon-button" disabled aria-label="Previous preview page"><ChevronLeft size={15} /></button>
+          <span>1 / 1</span>
+          <button className="icon-button" disabled aria-label="Next preview page"><ChevronRight size={15} /></button>
+        </div>
+      </div>
+      <section className="template-rail" aria-label="Templates">
+        <button type="button" className="template-rail-arrow previous" aria-label="Scroll templates left" onClick={() => rail.current?.scrollBy({ left: -300 })}><ChevronLeft size={17} /></button>
+        <div ref={rail} className="template-rail-strip">{railSelections.map((item) => {
+          const key = templateKey(item);
+          const selected = key === templateKey(selection);
+          const category = item.kind === "bundled" ? categoryLabels[item.template.category] : "Yours";
+          return <div className={"template-rail-item " + (selected ? "selected" : "")} key={key}>
+            <button type="button" className="template-rail-select" aria-pressed={selected} onClick={() => onSelect(item)}>
+              <span className="template-rail-preview">{item.kind === "bundled"
+                ? <BundledTemplateImage template={item.template} style={item.template.defaultCodeStyle} />
+                : <PersonalTemplateImage template={item.template} />}</span>
+              <strong>{item.template.name}</strong>
+              <small>{category}</small>
+            </button>
+            {item.kind === "personal" && <button type="button" className="icon-button template-rail-remove" aria-label={"Remove " + item.template.name} onClick={() => void onRemoveTemplate(item.template)}><Trash2 size={12} /></button>}
+          </div>;
+        })}
+          <button type="button" className="template-rail-create" onClick={() => void onReviewTemplate()}><FilePlus2 size={18} /><span>Save as Template…</span><small>Yours</small></button>
+        </div>
+        <button type="button" className="template-rail-arrow next" aria-label="Scroll templates right" onClick={() => rail.current?.scrollBy({ left: 300 })}><ChevronRight size={17} /></button>
+      </section>
     </section>
+    <form className="template-detail-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <div className="template-form-scroll">
+        <label className="template-form-field">
+          <span>Project Name</span>
+          <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} autoFocus />
+        </label>
+        <div className="template-form-field">
+          <span>Location</span>
+          <div className="template-location">
+            <span title={draft.parent}><Folder size={15} aria-hidden="true" />{draft.parent ? fileName(draft.parent) : "Choose a folder"}</span>
+            <button type="button" className="secondary-button" onClick={() => void chooseLocation()}>Choose…</button>
+          </div>
+        </div>
+        {configurable && <>
+          <fieldset className="template-option-group code-style-options">
+            <legend>Code Style</legend>
+            <div>{selection.template.codeStyles.map((style) => (
+              <label className={"code-style-option " + (draft.codeStyle === style ? "selected" : "")} key={style}>
+                <input className="sr-only" type="radio" name="code-style" value={style} checked={draft.codeStyle === style} onChange={() => onChange({ ...draft, codeStyle: style })} />
+                <CodeStyleSample style={style} />
+                <span>{style === "none" ? "None" : style === "strict" ? "Strict" : "Colorful"}</span>
+              </label>
+            ))}</div>
+          </fieldset>
+          <fieldset className="template-option-group code-language-options" disabled={draft.codeStyle === "none"}>
+            <legend>Code Languages</legend>
+            <div>{selection.template.codeLanguages.map((language) => {
+              const selected = draft.codeLanguages.includes(language);
+              return <label className={selected ? "selected" : ""} key={language}>
+                <input className="sr-only" type="checkbox" checked={selected} onChange={() => onChange({
+                  ...draft,
+                  codeLanguages: selected
+                    ? draft.codeLanguages.filter((item) => item !== language)
+                    : [...draft.codeLanguages, language],
+                })} />
+                {codeLanguageLabels[language]}
+              </label>;
+            })}</div>
+          </fieldset>
+        </>}
+        <p className="template-file-summary">{fileSummary}</p>
+      </div>
+      <div className="template-detail-actions">
+        <button type="button" className="secondary-button" onClick={onBack} disabled={creating}>Back</button>
+        <button className="primary-button" disabled={!draft.name.trim() || !draft.parent || creating}>{creating ? "Creating…" : "Create Project"}</button>
+      </div>
+    </form>
   </div>;
 }
 
-function CreateProjectDialog({ template, title, onClose, onCreated }: { template: string; title: string; onClose(): void; onCreated(path: string): void }) {
-  const [name, setName] = useState(template === "empty" ? "Untitled" : `My ${title.replace("New ", "")}`);
+function CodeStyleSample({ style }: { style: TemplateCodeStyle }) {
+  return <span className={"code-style-sample " + style} aria-hidden="true">
+    <code><b>def</b> add(a, b):</code>
+    <code>  <b>return</b> a + b</code>
+    <code className="sample-secondary">SELECT AVG(x)</code>
+  </span>;
+}
+
+function BundledTemplateImage({ template, style }: { template: BundledTemplateManifestV2; style?: TemplateCodeStyle | null }) {
+  const preview = useBundledPreview(template, style);
+  return preview ? <img src={preview} alt={template.name + " first-page preview"} /> : <span className="template-preview-loading">Loading preview…</span>;
+}
+
+function useBundledPreview(template: BundledTemplateManifestV2, style?: TemplateCodeStyle | null) {
+  const key = template.id + ":" + (style ?? "default");
+  const fallback = fallbackBundledTemplatePreview(template.id, style);
+  const [preview, setPreview] = useState<string | null>(() => previewCache.get(key) ?? fallback);
+  useEffect(() => {
+    const cached = previewCache.get(key);
+    if (cached) {
+      setPreview(cached);
+      return;
+    }
+    setPreview(fallback);
+    if (!isDesktop()) return;
+    let active = true;
+    void api.bundledTemplatePreview(template.id, style ?? null).then((value) => {
+      if (!active) return;
+      const source = "data:image/png;base64," + value;
+      previewCache.set(key, source);
+      setPreview(source);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [fallback, key, style, template.id]);
+  return preview;
+}
+
+function PersonalTemplateImage({ template }: { template: PersonalTemplateManifestV2 }) {
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!template.preview || !isDesktop()) return;
+    void api.personalTemplatePreview(template.id).then((value) => setPreview(value ? "data:image/png;base64," + value : null));
+  }, [template.id, template.preview]);
+  return preview
+    ? <img src={preview} alt={template.name + " first-page preview"} />
+    : <span className="personal-template-fallback"><LayoutTemplate size={34} strokeWidth={1.45} aria-hidden="true" /><small>Personal Template</small></span>;
+}
+
+function CreateEmptyProjectDialog({ onClose, onCreated }: { onClose(): void; onCreated(path: string): Promise<void> }) {
+  const [name, setName] = useState("Untitled");
   const [parent, setParent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const dialog = useModalFocus<HTMLFormElement>(onClose);
@@ -178,32 +439,24 @@ function CreateProjectDialog({ template, title, onClose, onCreated }: { template
   const submit = async () => {
     if (!name.trim() || !parent) return;
     try {
-      const bundledTemplate = templates.find((item) => item.id === template);
-      if (bundledTemplate) await useAppStore.getState().updateConfig({ latexEngine: bundledTemplate.engine });
-      const path = template === "empty"
-        ? await api.createProject(parent, name)
-        : template.startsWith("personal:")
-          ? await api.createProjectFromPersonalTemplate(template.slice("personal:".length), parent, name)
-          : await api.createProjectFromTemplate(parent, name, template);
+      const path = await api.createProject(parent, name.trim());
       onClose();
       await onCreated(path);
     } catch (reason) { setError(String(reason)); }
   };
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <form ref={dialog} className="native-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        <h2 id="create-project-title">{title}</h2>
-        <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></label>
-        <label><span>Location</span><div className="path-picker"><input value={parent} readOnly placeholder="Choose a folder" /><button type="button" className="secondary-button" onClick={choose}>Choose…</button></div></label>
-        {error && <p className="inline-error" role="alert">{error}</p>}
-        <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !parent}>Create</button></div>
-      </form>
-    </div>
-  );
+  return <div className="modal-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <form ref={dialog} className="native-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <h2 id="create-project-title">New Empty Project</h2>
+      <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></label>
+      <label><span>Location</span><div className="path-picker"><input value={parent} readOnly placeholder="Choose a folder" /><button type="button" className="secondary-button" onClick={() => void choose()}>Choose…</button></div></label>
+      {error && <p className="inline-error" role="alert">{error}</p>}
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !parent}>Create</button></div>
+    </form>
+  </div>;
 }
 
 function TemplateReviewDialog({ review, onClose, onCreated }: { review: TemplateReview; onClose(): void; onCreated(): Promise<void> }) {
-  const [name, setName] = useState(`${fileName(review.sourcePath)} Template`);
+  const [name, setName] = useState(fileName(review.sourcePath) + " Template");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useModalFocus<HTMLElement>(onClose);
@@ -223,10 +476,10 @@ function TemplateReviewDialog({ review, onClose, onCreated }: { review: Template
       <p>LighTex will copy the included files into its template library. The original project is not changed.</p>
       <label><span>Template name</span><input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></label>
       <div className="review-columns">
-        <ReviewList title={`Included · ${review.includedFiles.length}`} files={review.includedFiles} />
-        <ReviewList title={`Excluded · ${review.excludedFiles.length}`} files={review.excludedFiles} muted />
+        <ReviewList title={"Included · " + review.includedFiles.length} files={review.includedFiles} />
+        <ReviewList title={"Excluded · " + review.excludedFiles.length} files={review.excludedFiles} muted />
       </div>
-      <p className="review-note">Secrets, private keys, `.env`, Git data, caches, build output, and generated LaTeX files are excluded automatically. Included size: {formatBytes(review.totalSize)}.</p>
+      <p className="review-note">Secrets, private keys, .env, Git data, caches, build output, and generated LaTeX files are excluded automatically. Included size: {formatBytes(review.totalSize)}.</p>
       {error && <p className="inline-error" role="alert">{error}</p>}
       <div className="dialog-actions"><button className="secondary-button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" onClick={() => void submit()} disabled={!name.trim() || saving}>{saving ? "Saving…" : "Create Template"}</button></div>
     </section>
@@ -237,20 +490,18 @@ function ReviewList({ title, files, muted = false }: { title: string; files: str
   return <section className={muted ? "review-list muted" : "review-list"}><strong>{title}</strong><div>{files.length === 0 ? <small>None</small> : files.slice(0, 80).map((file) => <code key={file}>{file}</code>)}</div></section>;
 }
 
-function PersonalTemplatePreview({ template }: { template: PersonalTemplateManifestV2 }) {
-  const [preview, setPreview] = useState<string | null>(null);
-  useEffect(() => {
-    if (!template.preview) return;
-    void api.personalTemplatePreview(template.id).then((value) => setPreview(value ? `data:image/png;base64,${value}` : null));
-  }, [template.id, template.preview]);
-  return preview ? <span className="template-preview image"><img src={preview} alt={`${template.name} first-page preview`} /></span> : <TemplatePreview kind="Yours" icon={<LayoutTemplate size={29} strokeWidth={1.55} />} name={template.name} />;
+function createDraft(selection: TemplateSelection, parent: string): TemplateDraft {
+  if (selection.kind === "personal") {
+    return { name: selection.template.name, parent, codeStyle: "strict", codeLanguages: [] };
+  }
+  return {
+    name: selection.template.name,
+    parent,
+    codeStyle: selection.template.defaultCodeStyle ?? "strict",
+    codeLanguages: [...(selection.template.defaultCodeLanguages ?? [])],
+  };
 }
 
-function TemplatePreview({ kind, name, preview, icon }: { kind: string; name: string; preview?: string; icon?: React.ReactNode }) {
-  return preview
-    ? <span className="template-preview image"><img src={preview} alt={`${name} first-page preview`} /><span className="template-kind">{kind}</span></span>
-    : <span className="template-preview" aria-hidden="true"><span className="template-icon">{icon}</span><span className="template-kind">{kind}</span></span>;
-}
-
+const templateKey = (selection: TemplateSelection) => selection.kind + ":" + selection.template.id;
 const fileName = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
-const formatBytes = (bytes: number) => `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(bytes / (bytes >= 1_000_000 ? 1_000_000 : 1_000))} ${bytes >= 1_000_000 ? "MB" : "KB"}`;
+const formatBytes = (bytes: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(bytes / (bytes >= 1_000_000 ? 1_000_000 : 1_000)) + " " + (bytes >= 1_000_000 ? "MB" : "KB");

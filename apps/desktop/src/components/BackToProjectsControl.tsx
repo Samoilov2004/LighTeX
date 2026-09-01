@@ -1,16 +1,21 @@
 import { ArrowLeft } from "lucide-react";
 
-export function BackToProjectsControl({ onBack }: { onBack(): void }) {
+export function BackControl({ label, onBack }: { label: string; onBack(): void }) {
+  const accessibleLabel = `Back to ${label}`;
   return (
     <button
       type="button"
       className="toolbar-button project-back-control"
       onClick={onBack}
-      aria-label="Back to Projects"
-      title="Back to Projects"
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
     >
       <ArrowLeft size={16} aria-hidden="true" />
-      <span>Projects</span>
+      <span>{label}</span>
     </button>
   );
+}
+
+export function BackToProjectsControl({ onBack }: { onBack(): void }) {
+  return <BackControl label="Projects" onBack={onBack} />;
 }

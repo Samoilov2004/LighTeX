@@ -90,8 +90,20 @@ async fn run_cancellable_in(
     log.push_str(&String::from_utf8_lossy(&output.stderr));
     let cached_pdf = cache.join(entry.file_stem().unwrap()).with_extension("pdf");
     let success = output.status.success() && cached_pdf.is_file();
-    let diagnostics = parse_diagnostics(&log, root);
-    let missing_package_file = missing_package(&log);
+    let compiler_log =
+        fs::read_to_string(cache.join(entry.file_stem().unwrap()).with_extension("log")).ok();
+    let (diagnostics, used_compiler_log) = diagnostics_with_compiler_log_fallback(
+        &log,
+        compiler_log.as_deref(),
+        root,
+        entry.parent().unwrap_or(root),
+    );
+    let missing_package_file =
+        missing_package(&log).or_else(|| compiler_log.as_deref().and_then(missing_package));
+    if !success && used_compiler_log {
+        log.push_str("\n\n--- TeX engine log ---\n");
+        log.push_str(compiler_log.as_deref().unwrap_or_default());
+    }
     if !success {
         return Ok(BuildResult {
             succeeded: false,
@@ -115,18 +127,39 @@ async fn run_cancellable_in(
 }
 
 pub fn parse_diagnostics(log: &str, root: &Path) -> Vec<BuildDiagnosticGroup> {
+    parse_diagnostics_from(log, root, root)
+}
+
+fn diagnostics_with_compiler_log_fallback(
+    process_log: &str,
+    compiler_log: Option<&str>,
+    root: &Path,
+    working_directory: &Path,
+) -> (Vec<BuildDiagnosticGroup>, bool) {
+    let diagnostics = parse_diagnostics_from(process_log, root, working_directory);
+    if !diagnostics.is_empty() {
+        return (diagnostics, false);
+    }
+    let Some(compiler_log) = compiler_log else {
+        return (diagnostics, false);
+    };
+    let fallback = parse_diagnostics_from(compiler_log, root, working_directory);
+    let used_fallback = !fallback.is_empty();
+    (fallback, used_fallback)
+}
+
+fn parse_diagnostics_from(
+    log: &str,
+    root: &Path,
+    working_directory: &Path,
+) -> Vec<BuildDiagnosticGroup> {
     let file_line = Regex::new(r"(?m)^(.+?\.tex):(\d+):\s*(.+)$").unwrap();
     let warning = Regex::new(r"(?mi)^(?:LaTeX|Package .+?) Warning:\s*(.+)$").unwrap();
     let error = Regex::new(r"(?m)^!\s*(.+)$").unwrap();
     let mut diagnostics = Vec::new();
     for capture in file_line.captures_iter(log) {
         let raw = capture.get(1).unwrap().as_str();
-        let path = PathBuf::from(raw);
-        let relative = path
-            .strip_prefix(root)
-            .ok()
-            .map(|value| value.to_string_lossy().replace('\\', "/"))
-            .or_else(|| Some(raw.to_owned()));
+        let relative = diagnostic_path(raw, root, working_directory);
         diagnostics.push(BuildDiagnostic {
             severity: DiagnosticSeverity::Error,
             relative_path: relative,
@@ -169,6 +202,21 @@ pub fn parse_diagnostics(log: &str, root: &Path) -> Vec<BuildDiagnosticGroup> {
         }
     }
     groups
+}
+
+fn diagnostic_path(raw: &str, root: &Path, working_directory: &Path) -> Option<String> {
+    let raw_path = PathBuf::from(raw);
+    let candidate = if raw_path.is_absolute() {
+        raw_path.clone()
+    } else {
+        working_directory.join(&raw_path)
+    };
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canonical_candidate = candidate.canonicalize().unwrap_or(candidate);
+    if let Ok(relative) = canonical_candidate.strip_prefix(&canonical_root) {
+        return Some(relative.to_string_lossy().replace('\\', "/"));
+    }
+    Some(raw_path.to_string_lossy().replace('\\', "/"))
 }
 
 pub fn missing_package(log: &str) -> Option<String> {
@@ -230,6 +278,72 @@ mod tests {
     fn detects_missing_package_once() {
         let log = "! LaTeX Error: File `tikz.sty' not found.";
         assert_eq!(missing_package(log).as_deref(), Some("tikz.sty"));
+    }
+
+    #[test]
+    fn normalizes_latex_file_line_paths_for_inline_diagnostics() {
+        let temporary = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        fs::write(root.join("main.tex"), "\\bagin{equation}\n").unwrap();
+        let log = "./main.tex:1: Undefined control sequence.\nl.1 \\bagin\n./main.tex:1:  ==> Fatal error occurred!";
+
+        let diagnostics = parse_diagnostics(log, &root);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].primary.relative_path.as_deref(),
+            Some("main.tex")
+        );
+        assert_eq!(diagnostics[0].primary.line, Some(1));
+        assert_eq!(
+            diagnostics[0].primary.message,
+            "Undefined control sequence."
+        );
+        assert_eq!(diagnostics[0].related.len(), 1);
+    }
+
+    #[test]
+    fn resolves_diagnostics_from_a_nested_main_document_directory() {
+        let temporary = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let nested = root.join("notes");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("main.tex"), "\\bagin{equation}\n").unwrap();
+
+        let diagnostics =
+            parse_diagnostics_from("./main.tex:1: Undefined control sequence.", &root, &nested);
+
+        assert_eq!(
+            diagnostics[0].primary.relative_path.as_deref(),
+            Some("notes/main.tex")
+        );
+    }
+
+    #[test]
+    fn keeps_the_previous_tex_error_when_latexmk_only_reports_its_cached_failure() {
+        let temporary = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        fs::write(root.join("main.tex"), "\\bфgin{proof}\n").unwrap();
+        let latexmk_log = "Latexmk: Nothing to do for 'main.tex'.\n\
+Collected error summary (may duplicate other messages):\n\
+  xelatex: gave an error in previous invocation of latexmk.";
+        let compiler_log = "./main.tex:29: Undefined control sequence.\n\
+l.29 \\bфgin{proof}";
+
+        let (diagnostics, used_fallback) =
+            diagnostics_with_compiler_log_fallback(latexmk_log, Some(compiler_log), &root, &root);
+
+        assert!(used_fallback);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].primary.relative_path.as_deref(),
+            Some("main.tex")
+        );
+        assert_eq!(diagnostics[0].primary.line, Some(29));
+        assert_eq!(
+            diagnostics[0].primary.message,
+            "Undefined control sequence."
+        );
     }
 
     #[cfg(unix)]

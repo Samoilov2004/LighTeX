@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "scientific-article",
   "name": "Scientific Article",
   "description": "A research article with an abstract, numbered sections, tables, and BibLaTeX references.",
   "category": "academic",
+  "sortOrder": 40,
   "engine": "xelatex",
   "entry": "main.tex",
   "preview": "preview.png",

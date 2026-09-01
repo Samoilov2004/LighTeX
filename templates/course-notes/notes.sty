@@ -1,0 +1,108 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{notes}[2026/09/01 Compact course notes]
+
+\RequirePackage{iftex}
+\ifXeTeX\else
+  \PackageError{notes}{Course Notes requires XeLaTeX}{Choose XeLaTeX in LighTex and build again.}
+\fi
+
+\PassOptionsToPackage{warnings-off={mathtools-colon,mathtools-overbracket}}{unicode-math}
+\RequirePackage{mathtools}
+\RequirePackage{amssymb}
+\RequirePackage{newcomputermodern}
+\RequirePackage[a4paper,margin=25mm,headheight=14pt]{geometry}
+\RequirePackage{microtype}
+\RequirePackage{xcolor}
+\RequirePackage{amsthm}
+\RequirePackage{tcolorbox}
+\tcbuselibrary{breakable,skins}
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage{hyperref}
+\RequirePackage[capitalise,noabbrev]{cleveref}
+
+\definecolor{NotesInk}{HTML}{20242A}
+\definecolor{NotesMuted}{HTML}{68707A}
+\definecolor{NotesAccent}{HTML}{2867B2}
+\definecolor{NotesAccentLight}{HTML}{F1F6FC}
+\definecolor{NotesLine}{HTML}{D7DCE2}
+\definecolor{CodeBackground}{HTML}{F7F8FA}
+\definecolor{CodeBlue}{HTML}{215FBE}
+\definecolor{CodeGreen}{HTML}{2C6A4F}
+\definecolor{CodePurple}{HTML}{8452A6}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=NotesAccent,
+  urlcolor=NotesAccent,
+  citecolor=NotesAccent
+}
+
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.15em}
+\setlength{\emergencystretch}{2em}
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
+
+\titleformat{\chapter}[display]
+  {\normalfont}
+  {\color{NotesMuted}\small\bfseries\MakeUppercase{\chaptername}~\thechapter}
+  {0.35em}
+  {\color{NotesInk}\huge\bfseries}
+\titlespacing*{\chapter}{0pt}{-25pt}{20pt}
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{NotesInk}}
+  {\thesection}{0.7em}{}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{NotesMuted}\nouppercase{\leftmark}}
+\fancyhead[R]{\small\color{NotesMuted}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyfoot[C]{\small\color{NotesMuted}\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+\newtheoremstyle{notesplain}
+  {9pt}{9pt}
+  {\itshape}{0pt}
+  {\bfseries\color{NotesInk}}
+  {.}{0.55em}{}
+\newtheoremstyle{notesdefinition}
+  {9pt}{9pt}
+  {\normalfont}{0pt}
+  {\bfseries\color{NotesInk}}
+  {.}{0.55em}{}
+
+\theoremstyle{notesplain}
+\newtheorem{theorem}{Theorem}[chapter]
+\theoremstyle{notesdefinition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{remark}[theorem]{Remark}
+
+\newtcolorbox{keyidea}{
+  enhanced,
+  breakable,
+  colback=NotesAccentLight,
+  frame hidden,
+  borderline west={2pt}{0pt}{NotesAccent},
+  sharp corners,
+  boxsep=0pt,
+  left=10pt,right=10pt,top=8pt,bottom=8pt,
+  before skip=10pt,after skip=10pt
+}
+
+\newcommand{\term}[1]{\textbf{#1}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+
+% LighTex:CodeSupport
+
+\endinput

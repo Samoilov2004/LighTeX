@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "id": "course-notes",
+  "name": "Course Notes",
+  "description": "A compact single-chapter notebook for lectures, mathematics, and code.",
+  "category": "essentials",
+  "sortOrder": 30,
+  "engine": "xelatex",
+  "entry": "main.tex",
+  "preview": "preview-strict.png",
+  "previewVariants": {
+    "none": "preview-none.png",
+    "strict": "preview-strict.png",
+    "colorful": "preview-colorful.png"
+  },
+  "documentClass": "report",
+  "tags": ["notes", "mathematics", "theorems", "code"],
+  "codeStyles": ["none", "strict", "colorful"],
+  "codeLanguages": ["python", "sql", "cpp", "javaScript", "rust", "java", "shell"],
+  "defaultCodeStyle": "strict",
+  "defaultCodeLanguages": ["python", "sql"]
+}

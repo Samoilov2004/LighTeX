@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, BookmarkPlus, CircleAlert, FileText, Folder, History, PanelLeft, PanelRight, Search, Settings, Sigma } from "lucide-react";
+import { ArchiveRestore, BookmarkPlus, CircleX, FileText, Folder, History, PanelLeft, PanelRight, Search, Settings, Sigma } from "lucide-react";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -14,13 +14,13 @@ import { InsertShelf } from "./InsertShelf";
 import { OutlineDrawer } from "./OutlineDrawer";
 import { outlineItemKey } from "../outlinePages";
 import { PdfPreview } from "./PdfPreview";
-import { ProblemsPanel } from "./ProblemsPanel";
 import { SearchPanel } from "./SearchPanel";
 import { SourceEditor, type SourceEditorHandle } from "./SourceEditor";
 import { WindowDragRegion } from "./WindowDragRegion";
 import type { ProjectVersionSummary, SyncTeXPdfTarget } from "../types";
 import { useModalFocus } from "../useModalFocus";
 import { RestoreVersionDialog, SaveVersionDialog, VersionsPanel } from "./VersionsPanel";
+import { buildErrorEntryPaths } from "../buildDiagnostics";
 
 export function Workspace() {
   const state = useAppStore();
@@ -41,6 +41,13 @@ export function Workspace() {
   const displayedOutline = preview?.outline ?? state.outline;
   const displayedPdf = preview?.pdfBase64 ?? state.pdfBase64;
   const selectedDocument = displayedSelectedPath ? displayedDocuments[displayedSelectedPath] : null;
+  const inlineDiagnostics = useMemo(() => !preview && selectedDocument
+    ? (state.buildResult?.diagnostics ?? []).filter((group) => group.primary.relativePath === selectedDocument.relativePath)
+    : [], [preview, selectedDocument?.relativePath, state.buildResult]);
+  const buildErrorPaths = useMemo<ReadonlySet<string>>(
+    () => preview ? new Set<string>() : buildErrorEntryPaths(state.buildResult),
+    [preview, state.buildResult],
+  );
   const syncExecutable = state.activeToolchain.synctex?.path;
   const acceptPdfOutlinePages = useCallback((pages: Record<string, number>) => {
     useAppStore.setState((current) => current.versionPreview
@@ -237,7 +244,6 @@ export function Workspace() {
         </div>
         <div className="project-toolbar-group" role="group" aria-label="Editor panels">
           <button className={`toolbar-button ${state.insertShelfOpen ? "pressed" : ""}`} disabled={Boolean(preview)} onClick={() => useAppStore.setState({ insertShelfOpen: !state.insertShelfOpen })} aria-label="Toggle Insert Shelf" aria-pressed={state.insertShelfOpen} title="Symbols, equations, figures, and tables"><Sigma size={15} /><span>Insert</span></button>
-          <button className={`toolbar-button ${state.problemsOpen ? "pressed" : ""}`} disabled={Boolean(preview)} onClick={() => useAppStore.setState({ problemsOpen: !state.problemsOpen })} aria-label="Toggle Problems" aria-pressed={state.problemsOpen} title="Problems"><CircleAlert size={15} /><span>Problems</span></button>
         </div>
         <BuildControls
           automaticBuilds={state.config.automaticBuilds}
@@ -263,7 +269,7 @@ export function Workspace() {
             </div>}
             <div className="sidebar-primary-content">
               {preview ? <FileTree readOnly entries={preview.entries} selectedPath={preview.selectedPath} mainDocument={preview.version.mainDocument} onOpen={(path) => void state.openVersionDocument(path)} onCreateFile={() => undefined} onCreateFolder={() => undefined} onUpload={() => undefined} onRename={() => undefined} onDuplicate={() => undefined} onTrash={() => undefined} onMove={() => undefined} onReveal={() => undefined} onSetMain={() => undefined} /> : <>
-                {state.sidebarMode === "files" && <FileTree entries={state.entries} selectedPath={state.selectedPath} mainDocument={state.mainDocument} onOpen={(path) => void state.openDocument(path)} onCreateFile={createFile} onCreateFolder={createFolder} onUpload={upload} onRename={rename} onDuplicate={duplicate} onTrash={trash} onMove={move} onReveal={(path) => { if (state.project) void revealItemInDir(`${state.project.rootPath}/${path}`); }} onSetMain={(path) => void state.setMainDocument(path)} />}
+                {state.sidebarMode === "files" && <FileTree errorPaths={buildErrorPaths} entries={state.entries} selectedPath={state.selectedPath} mainDocument={state.mainDocument} onOpen={(path) => void state.openDocument(path)} onCreateFile={createFile} onCreateFolder={createFolder} onUpload={upload} onRename={rename} onDuplicate={duplicate} onTrash={trash} onMove={move} onReveal={(path) => { if (state.project) void revealItemInDir(`${state.project.rootPath}/${path}`); }} onSetMain={(path) => void state.setMainDocument(path)} />}
                 {state.sidebarMode === "search" && <SearchPanel />}
               </>}
             </div>
@@ -304,7 +310,7 @@ export function Workspace() {
                 {selectedDocument.externalChange === "deleted" && <button onClick={() => void state.closeDocument(selectedDocument.relativePath)}>Close</button>}
               </div>}
               <section className="source-pane" aria-label="Source editor">
-                {selectedDocument ? <SourceEditor readOnly={Boolean(preview)} diff={preview?.fileDiffs[selectedDocument.relativePath] ?? null} ref={sourceEditorRef} key={`${preview?.version.id ?? "current"}:${selectedDocument.relativePath}`} historyKey={preview ? `version:${preview.version.id}:${selectedDocument.relativePath}` : `${state.project?.id ?? "project"}:${selectedDocument.relativePath}`} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onUndoAvailabilityChange={setCanUndo} onChange={(text) => { if (!preview) state.updateText(selectedDocument.relativePath, text); }} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
+                {selectedDocument ? <SourceEditor readOnly={Boolean(preview)} diff={preview?.fileDiffs[selectedDocument.relativePath] ?? null} diagnostics={inlineDiagnostics} buildLog={state.buildResult?.log ?? ""} ref={sourceEditorRef} key={`${preview?.version.id ?? "current"}:${selectedDocument.relativePath}`} historyKey={preview ? `version:${preview.version.id}:${selectedDocument.relativePath}` : `${state.project?.id ?? "project"}:${selectedDocument.relativePath}`} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onUndoAvailabilityChange={setCanUndo} onChange={(text) => { if (!preview) state.updateText(selectedDocument.relativePath, text); }} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
               </section>
               {!preview && state.insertShelfOpen && <InsertShelf onClose={() => useAppStore.setState({ insertShelfOpen: false })} />}
             </div>
@@ -322,11 +328,10 @@ export function Workspace() {
               }} />
             </>}
           </div>
-          {!preview && state.problemsOpen && <ProblemsPanel />}
         </div>
       </div>
       <footer className="status-bar">
-        <span className={`status-dot ${state.buildState}`} />
+        {state.buildState === "failure" ? <CircleX className="status-failure-icon" size={13} aria-hidden="true" /> : <span className={`status-dot ${state.buildState}`} />}
         <span>{state.statusMessage}</span>
         <div className="toolbar-spacer" />
         <span>{displayedSelectedPath ?? "No file"}</span>

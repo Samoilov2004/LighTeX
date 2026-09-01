@@ -647,6 +647,65 @@ pub struct TemplateReview {
     pub total_size: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum BundledTemplateCategory {
+    Essentials,
+    Academic,
+    Slides,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TemplateCodeStyle {
+    None,
+    Strict,
+    Colorful,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TemplateCodeLanguage {
+    Python,
+    Sql,
+    Cpp,
+    JavaScript,
+    Rust,
+    Java,
+    Shell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TemplateInstantiationOptions {
+    pub code_style: Option<TemplateCodeStyle>,
+    pub code_languages: Option<Vec<TemplateCodeLanguage>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BundledTemplateManifestV2 {
+    pub schema_version: u8,
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: BundledTemplateCategory,
+    pub sort_order: u16,
+    pub engine: LatexEngine,
+    pub entry: String,
+    pub preview: String,
+    pub preview_variants: BTreeMap<String, String>,
+    pub code_styles: Vec<TemplateCodeStyle>,
+    pub code_languages: Vec<TemplateCodeLanguage>,
+    pub default_code_style: Option<TemplateCodeStyle>,
+    pub default_code_languages: Vec<TemplateCodeLanguage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

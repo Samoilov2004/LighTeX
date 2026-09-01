@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../types";
 import { SourceEditor, type SourceEditorHandle } from "./SourceEditor";
@@ -103,5 +103,45 @@ describe("SourceEditor history", () => {
     expect(container.querySelector(".cm-version-added-line")).toBeInTheDocument();
     expect(container.querySelector(".cm-version-deleted-row")).toHaveTextContent("old value");
     expect(container.querySelector(".cm-version-added-sign")).toHaveTextContent("+");
+  });
+
+  it("shows a compact inline diagnostic and toggles the floating build log", async () => {
+    const { container } = render(
+      <SourceEditor
+        path="main.tex"
+        historyKey="project:diagnostic:main.tex"
+        value={["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "\\bagin{equation}"].join("\n")}
+        config={defaultConfig}
+        completion={emptyCompletion}
+        onChange={() => {}}
+        diagnostics={[{
+          primary: {
+            severity: "error",
+            relativePath: "main.tex",
+            line: 10,
+            message: "Undefined control sequence. Check the command spelling or required package.",
+          },
+          related: [],
+        }]}
+        buildLog={"This is pdfTeX\n! Undefined control sequence.\nl.10 \\bagin{equation}\n"}
+      />,
+    );
+
+    const openLog = await screen.findByRole("button", { name: "Open Log" });
+    expect(openLog.querySelector("svg")).toBeNull();
+    expect(container.querySelector(".cm-diagnostic-range.error")).toHaveTextContent("\\bagin");
+    expect(container.querySelector(".cm-diagnostic-gutter-marker.error")).toBeInTheDocument();
+
+    fireEvent.click(openLog);
+    expect(await screen.findByRole("dialog", { name: "Build Log" })).toHaveTextContent("Undefined control sequence");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Build Log" })).not.toBeInTheDocument();
+    expect(openLog).toHaveFocus();
+
+    fireEvent.click(openLog);
+    expect(await screen.findByRole("dialog", { name: "Build Log" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Build Log" })).not.toBeInTheDocument();
   });
 });

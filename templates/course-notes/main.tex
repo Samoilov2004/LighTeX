@@ -1,0 +1,61 @@
+\documentclass[11pt,a4paper,oneside]{report}
+
+\usepackage{notes}
+
+\begin{document}
+
+\chapter{Window Functions}
+
+Window functions let us study a finite portion of a signal while controlling
+the artifacts introduced at its boundaries. They appear in spectral analysis,
+filter design, statistics, and numerical computation.
+
+\begin{definition}[Window function]
+A \term{window function} is a finite sequence
+\[
+  w[0],w[1],\ldots,w[N-1]
+\]
+used to weight a signal before it is analysed. The windowed signal is
+\[
+  x_w[n] = x[n]w[n].
+\]
+\end{definition}
+
+\begin{theorem}[Symmetry]
+If a real-valued window satisfies \(w[n]=w[N-1-n]\), then its discrete-time
+Fourier transform has linear phase.
+\end{theorem}
+
+\begin{proof}
+Pair the terms indexed by \(n\) and \(N-1-n\) in the Fourier sum. Their common
+phase factor is \(e^{-i\omega(N-1)/2}\), while the remaining factor is real and
+even in \(\omega\).
+\end{proof}
+
+\section{The Hann window}
+
+The Hann window is defined by
+\[
+  w[n] =
+  \frac{1}{2}\left(1-\cos\frac{2\pi n}{N-1}\right),
+  \qquad 0\le n<N.
+\]
+Its samples taper smoothly to zero, reducing spectral leakage at the cost of a
+wider main lobe.
+
+\begin{keyidea}
+Window selection is a trade-off: a narrow main lobe improves frequency
+resolution, while low side lobes suppress leakage from strong neighbouring
+components.
+\end{keyidea}
+
+\begin{example}
+For \(N=8\), evaluating the formula gives a symmetric sequence:
+\[
+  (0,\;0.188,\;0.611,\;0.950,\;0.950,\;0.611,\;0.188,\;0).
+\]
+\end{example}
+
+% LighTex:CodeExample
+
+\end{document}

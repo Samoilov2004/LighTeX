@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fs,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -9,14 +10,16 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use lightex_core::{
-    AppConfigV1, AppUpdateInfo, BuildRequest, BuildResult, DocumentRevision, DocumentSnapshot,
-    InstalledRuntime, ManagedRuntimeRecordV2, OpenBuffer, OutlineItem, PersonalTemplateManifestV2,
-    ProjectChangeEvent, ProjectCompletionIndex, ProjectEntry, ProjectHandle, ProjectId,
-    ProjectMonitor, ProjectRegistry, ProjectSessionV2, ProjectVersionId, ProjectVersionSummary,
-    ReplacePreview, RuntimeEnvironment, RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant,
-    SaveOutcome, SearchQuery, SearchResult, StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget,
-    TemplateReview, ToolchainStatus, VersionChangeSummary, VersionFileDiff, VersionLineSummary,
-    VersionPreviewEvent, VersionPreviewStatus, VersionRestoreOutcome, VersionSnapshotReview,
+    AppConfigV1, AppUpdateInfo, BuildRequest, BuildResult, BundledTemplateManifestV2,
+    DocumentRevision, DocumentSnapshot, InstalledRuntime, ManagedRuntimeRecordV2, OpenBuffer,
+    OutlineItem, PersonalTemplateManifestV2, ProjectChangeEvent, ProjectCompletionIndex,
+    ProjectEntry, ProjectHandle, ProjectId, ProjectMonitor, ProjectRegistry, ProjectSessionV2,
+    ProjectVersionId, ProjectVersionSummary, ReplacePreview, RuntimeEnvironment,
+    RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant, SaveOutcome, SearchQuery, SearchResult,
+    StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget, TemplateCodeStyle,
+    TemplateInstantiationOptions, TemplateReview, ToolchainStatus, VersionChangeSummary,
+    VersionFileDiff, VersionLineSummary, VersionPreviewEvent, VersionPreviewStatus,
+    VersionRestoreOutcome, VersionSnapshotReview,
 };
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -114,6 +117,7 @@ fn create_project_from_template(
     parent_path: String,
     name: String,
     template: String,
+    options: Option<TemplateInstantiationOptions>,
     app: AppHandle,
 ) -> Result<String, String> {
     let templates_root = bundled_templates_root(&app)?;
@@ -122,9 +126,30 @@ fn create_project_from_template(
         &name,
         &templates_root,
         &template,
+        options.as_ref(),
     )
     .map(|path| path.to_string_lossy().into_owned())
     .map_err(Into::into)
+}
+
+#[tauri::command]
+fn list_bundled_templates(app: AppHandle) -> Result<Vec<BundledTemplateManifestV2>, String> {
+    let templates_root = bundled_templates_root(&app)?;
+    lightex_core::project::list_bundled_templates(&templates_root).map_err(Into::into)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn bundled_template_preview(
+    template: String,
+    style: Option<TemplateCodeStyle>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let templates_root = bundled_templates_root(&app)?;
+    let path = lightex_core::project::bundled_template_preview(&templates_root, &template, style)
+        .map_err(String::from)?;
+    fs::read(path)
+        .map(|bytes| STANDARD.encode(bytes))
+        .map_err(|error| error.to_string())
 }
 
 fn bundled_templates_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1108,6 +1133,8 @@ pub fn run() {
             close_project,
             create_project,
             create_project_from_template,
+            list_bundled_templates,
+            bundled_template_preview,
             scan_project,
             open_document,
             document_revision,
