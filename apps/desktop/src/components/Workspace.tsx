@@ -34,6 +34,7 @@ export function Workspace() {
   const [restoreVersion, setRestoreVersion] = useState<ProjectVersionSummary | null>(null);
   const uploadDialog = useModalFocus<HTMLElement>(() => setUploadTarget(null), uploadTarget !== null);
   const sourceEditorRef = useRef<SourceEditorHandle>(null);
+  const insertButtonRef = useRef<HTMLButtonElement>(null);
   const preview = state.versionPreview;
   const displayedDocuments = preview?.documents ?? state.documents;
   const displayedTabs = preview?.tabs ?? state.tabs;
@@ -53,6 +54,10 @@ export function Workspace() {
     useAppStore.setState((current) => current.versionPreview
       ? { versionPreview: { ...current.versionPreview, outlinePages: { ...current.versionPreview.outlinePages, ...pages } } }
       : { outlinePages: { ...current.outlinePages, ...pages } });
+  }, []);
+  const closeInsertShelf = useCallback((restoreFocus = false) => {
+    useAppStore.setState({ insertShelfOpen: false });
+    if (restoreFocus) window.requestAnimationFrame(() => insertButtonRef.current?.focus());
   }, []);
 
   useEffect(() => setPdfTarget(null), [preview?.version.id, displayedPdf]);
@@ -242,8 +247,19 @@ export function Workspace() {
           <button className="toolbar-button" onClick={() => setSaveVersionOpen(true)} disabled={Boolean(preview) || state.versionOperation !== null} aria-label="Save Version" title="Save a named project version"><BookmarkPlus size={15} aria-hidden="true" /><span>Save Version</span></button>
           <button className={`toolbar-button ${state.versionsOpen ? "pressed" : ""}`} onClick={() => void state.toggleVersions()} aria-label="Show saved versions" aria-pressed={state.versionsOpen} title="Saved versions"><History size={15} aria-hidden="true" /><span>Versions</span></button>
         </div>
-        <div className="project-toolbar-group" role="group" aria-label="Editor panels">
-          <button className={`toolbar-button ${state.insertShelfOpen ? "pressed" : ""}`} disabled={Boolean(preview)} onClick={() => useAppStore.setState({ insertShelfOpen: !state.insertShelfOpen })} aria-label="Toggle Insert Shelf" aria-pressed={state.insertShelfOpen} title="Symbols, equations, figures, and tables"><Sigma size={15} /><span>Insert</span></button>
+        <div className="project-toolbar-group insert-control" role="group" aria-label="Editor panels">
+          <button
+            ref={insertButtonRef}
+            className={`toolbar-button ${state.insertShelfOpen ? "pressed" : ""}`}
+            disabled={Boolean(preview)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => useAppStore.setState((current) => ({ insertShelfOpen: !current.insertShelfOpen }))}
+            aria-label="Open Insert"
+            aria-haspopup="dialog"
+            aria-expanded={state.insertShelfOpen}
+            title="Symbols, equations, figures, and tables"
+          ><Sigma size={15} /><span>Insert</span></button>
+          {!preview && state.insertShelfOpen && <InsertShelf onClose={closeInsertShelf} />}
         </div>
         <BuildControls
           automaticBuilds={state.config.automaticBuilds}
@@ -312,7 +328,6 @@ export function Workspace() {
               <section className="source-pane" aria-label="Source editor">
                 {selectedDocument ? <SourceEditor readOnly={Boolean(preview)} diff={preview?.fileDiffs[selectedDocument.relativePath] ?? null} diagnostics={inlineDiagnostics} buildLog={state.buildResult?.log ?? ""} ref={sourceEditorRef} key={`${preview?.version.id ?? "current"}:${selectedDocument.relativePath}`} historyKey={preview ? `version:${preview.version.id}:${selectedDocument.relativePath}` : `${state.project?.id ?? "project"}:${selectedDocument.relativePath}`} path={selectedDocument.relativePath} value={selectedDocument.text} config={state.config} completion={state.completion} onUndoAvailabilityChange={setCanUndo} onChange={(text) => { if (!preview) state.updateText(selectedDocument.relativePath, text); }} /> : <div className="empty-state"><FileText size={25} /><span className="empty-state-title">No file open</span><span>Choose a text file from the project sidebar.</span></div>}
               </section>
-              {!preview && state.insertShelfOpen && <InsertShelf onClose={() => useAppStore.setState({ insertShelfOpen: false })} />}
             </div>
             {state.pdfVisible && <>
               <ResizeDivider axis="x" onMove={(delta) => setEditorFraction((fraction) => Math.max(0.3, Math.min(0.7, fraction + delta / Math.max(700, window.innerWidth - sidebarWidth))))} />

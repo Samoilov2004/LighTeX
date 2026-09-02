@@ -304,7 +304,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           statusMessage: "Browser preview",
         });
       } else {
-        set({ phase: "hub", config: defaultConfig, settingsOpen: preview === "settings", statusMessage: "Browser preview" });
+        const settingsPreviewToolchain: ToolchainStatus = {
+          engines: {
+            lualatex: { path: "/Library/TeX/texbin/lualatex", version: "LuaHBTeX 1.22.0" },
+            pdflatex: { path: "/Library/TeX/texbin/pdflatex", version: "pdfTeX 1.40.28" },
+            xelatex: { path: "/Library/TeX/texbin/xelatex", version: "XeTeX 0.999997" },
+          },
+          latexmk: { path: "/Library/TeX/texbin/latexmk", version: "4.90" },
+          synctex: { path: "/Library/TeX/texbin/synctex", version: "1.5" },
+          tlmgr: { path: "/Library/TeX/texbin/tlmgr", version: "2026" },
+        };
+        set({
+          phase: "hub",
+          config: preview === "settings" ? { ...defaultConfig, texProvider: "system" } : defaultConfig,
+          systemToolchain: preview === "settings" ? settingsPreviewToolchain : emptyToolchain,
+          activeToolchain: preview === "settings" ? settingsPreviewToolchain : emptyToolchain,
+          settingsOpen: preview === "settings",
+          statusMessage: "Browser preview",
+        });
       }
       return;
     }

@@ -2,7 +2,7 @@
   <img src="Resources/AppIcon.png" width="132" alt="LighTex icon">
 </p>
 
-<h1 align="center">LighTex 1.1.4</h1>
+<h1 align="center">LighTex 1.1.5</h1>
 
 <p align="center">
   A focused local LaTeX editor for macOS and Linux, with source and PDF side by side.
@@ -16,7 +16,7 @@
 | Intel Mac | [**Download the macOS DMG**](https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-macOS-Intel.dmg) |
 | Ubuntu or Debian (`x86_64`) | [**Download the Linux DEB**](https://github.com/Samoilov2004/LighTeX/releases/latest/download/LighTex-Linux-amd64.deb) |
 
-[View LighTex 1.1.4 and its checksums](https://github.com/Samoilov2004/LighTeX/releases/tag/v1.1.4)
+[View LighTex 1.1.5 and its checksums](https://github.com/Samoilov2004/LighTeX/releases/tag/v1.1.5)
 
 <p align="center">
   Apple Silicon: macOS 11+ · Intel Mac: macOS 10.15+ · Linux: Ubuntu 22.04+ or Debian 12+, x86_64

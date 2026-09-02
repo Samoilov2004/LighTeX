@@ -102,95 +102,97 @@ export function BuildControls({
 
   return (
     <div className="project-toolbar-group build-controls" role="group" aria-label="Build controls" ref={root}>
-      <button
-        className="primary-button compact build-primary-button"
-        disabled={disabled}
-        onClick={buildState === "building" ? onCancel : onBuild}
-      >
-        {buildState === "building" ? <Square size={11} fill="currentColor" aria-hidden="true" /> : <Play size={13} fill="currentColor" aria-hidden="true" />}
-        {buildState === "building" ? "Cancel" : "Recompile"}
-      </button>
-      <div className="build-mode-control">
+      <div className="build-split-control">
         <button
-          ref={disclosure}
-          className={`build-mode-button ${open ? "pressed" : ""}`}
+          className="primary-button compact build-primary-button"
           disabled={disabled}
-          onClick={(event) => {
-            if (open) close();
-            else {
-              setOpen(true);
-              event.currentTarget.blur();
-            }
-          }}
-          onKeyDown={(event) => {
-            if (!open && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")) {
-              event.preventDefault();
-              openedWithKeyboard.current = true;
-              setOpen(true);
-            } else if (open && event.key === "ArrowDown") {
-              event.preventDefault();
-              const selected = menu.current?.querySelector<HTMLButtonElement>("[role='menuitemradio'][aria-checked='true']");
-              selected?.focus();
-            }
-          }}
-          aria-label="Build mode"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title="Build mode"
+          onClick={buildState === "building" ? onCancel : onBuild}
         >
-          <ChevronDown size={14} aria-hidden="true" />
+          {buildState === "building" ? <Square size={10} fill="currentColor" aria-hidden="true" /> : <Play size={12} fill="currentColor" aria-hidden="true" />}
+          {buildState === "building" ? "Cancel" : "Recompile"}
         </button>
-        {open && (
-          <div
-            ref={menu}
-            className="popover-menu build-mode-menu"
-            role="menu"
-            aria-label="Build mode"
-            onKeyDown={mainMenuKeyDown}
-            onBlur={(event) => {
-              if (!root.current?.contains(event.relatedTarget as Node | null)) close();
+        <div className="build-mode-control">
+          <button
+            ref={disclosure}
+            className={`build-mode-button ${open ? "pressed" : ""}`}
+            disabled={disabled}
+            onClick={(event) => {
+              if (open) close();
+              else {
+                setOpen(true);
+                event.currentTarget.blur();
+              }
             }}
+            onKeyDown={(event) => {
+              if (!open && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                openedWithKeyboard.current = true;
+                setOpen(true);
+              } else if (open && event.key === "ArrowDown") {
+                event.preventDefault();
+                const selected = menu.current?.querySelector<HTMLButtonElement>("[role='menuitemradio'][aria-checked='true']");
+                selected?.focus();
+              }
+            }}
+            aria-label="Build mode"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title="Build mode"
           >
-            <button role="menuitemradio" aria-checked={!automaticBuilds} onClick={(event) => { onAutomaticBuildsChange(false); close(event.detail === 0); }}>
-              <Check className="menu-check" size={14} aria-hidden="true" />
-              <span>Manual</span>
-            </button>
-            <button role="menuitemradio" aria-checked={automaticBuilds} onClick={(event) => { onAutomaticBuildsChange(true); close(event.detail === 0); }}>
-              <Check className="menu-check" size={14} aria-hidden="true" />
-              <span>Auto Compile</span>
-            </button>
-            <div className="menu-separator" role="separator" />
-            <button
-              ref={delayButton}
-              className="build-delay-row"
-              role="menuitem"
-              aria-haspopup="menu"
-              aria-expanded={delayOpen}
-              disabled={!automaticBuilds}
-              onClick={() => setDelayOpen((value) => !value)}
+            <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" />
+          </button>
+          {open && (
+            <div
+              ref={menu}
+              className="popover-menu build-mode-menu"
+              role="menu"
+              aria-label="Build mode"
+              onKeyDown={mainMenuKeyDown}
+              onBlur={(event) => {
+                if (!root.current?.contains(event.relatedTarget as Node | null)) close();
+              }}
             >
-              <span>Delay</span>
-              <small>{delaySeconds} sec</small>
-              <ChevronRight size={13} aria-hidden="true" />
-            </button>
-            {delayOpen && automaticBuilds && (
-              <div className="popover-menu build-delay-menu" role="menu" aria-label="Auto Compile delay" onKeyDown={delayMenuKeyDown}>
-                {delayOptions.map((seconds) => (
-                  <button
-                    key={seconds}
-                    ref={seconds === delaySeconds ? selectedDelay : undefined}
-                    role="menuitemradio"
-                    aria-checked={seconds === delaySeconds}
-                    onClick={(event) => { onDelayChange(seconds); close(event.detail === 0); }}
-                  >
-                    <Check className="menu-check" size={14} aria-hidden="true" />
-                    <span>{seconds} seconds</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+              <button role="menuitemradio" aria-checked={!automaticBuilds} onClick={(event) => { onAutomaticBuildsChange(false); close(event.detail === 0); }}>
+                <Check className="menu-check" size={14} aria-hidden="true" />
+                <span>Manual</span>
+              </button>
+              <button role="menuitemradio" aria-checked={automaticBuilds} onClick={(event) => { onAutomaticBuildsChange(true); close(event.detail === 0); }}>
+                <Check className="menu-check" size={14} aria-hidden="true" />
+                <span>Auto Compile</span>
+              </button>
+              <div className="menu-separator" role="separator" />
+              <button
+                ref={delayButton}
+                className="build-delay-row"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={delayOpen}
+                disabled={!automaticBuilds}
+                onClick={() => setDelayOpen((value) => !value)}
+              >
+                <span>Delay</span>
+                <small>{delaySeconds} sec</small>
+                <ChevronRight size={13} aria-hidden="true" />
+              </button>
+              {delayOpen && automaticBuilds && (
+                <div className="popover-menu build-delay-menu" role="menu" aria-label="Auto Compile delay" onKeyDown={delayMenuKeyDown}>
+                  {delayOptions.map((seconds) => (
+                    <button
+                      key={seconds}
+                      ref={seconds === delaySeconds ? selectedDelay : undefined}
+                      role="menuitemradio"
+                      aria-checked={seconds === delaySeconds}
+                      onClick={(event) => { onDelayChange(seconds); close(event.detail === 0); }}
+                    >
+                      <Check className="menu-check" size={14} aria-hidden="true" />
+                      <span>{seconds} seconds</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

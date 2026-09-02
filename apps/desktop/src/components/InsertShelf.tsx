@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, FunctionSquare, Image, PanelsTopLeft, Search, Sigma, Table2, X } from "lucide-react";
+import { FunctionSquare, Image, PanelsTopLeft, Search, Sigma, Table2, X } from "lucide-react";
 import { filterSymbols, symbolCategories, type SymbolCategory } from "../insertCatalog";
 import { MathSnippetPreview } from "./MathSnippetPreview";
 import {
@@ -16,7 +16,7 @@ import {
 
 type Category = "symbols" | "math" | "blocks" | "figures" | "tables";
 
-export function InsertShelf({ onClose }: { onClose(): void }) {
+export function InsertShelf({ onClose }: { onClose(restoreFocus?: boolean): void }) {
   const [category, setCategory] = useState<Category>("symbols");
   const [query, setQuery] = useState("");
   const [symbolCategory, setSymbolCategory] = useState<"All" | SymbolCategory>("Greek");
@@ -26,48 +26,75 @@ export function InsertShelf({ onClose }: { onClose(): void }) {
   const filteredSymbols = useMemo(() => filterSymbols(deferredQuery, symbolCategory), [deferredQuery, symbolCategory]);
   const filteredMath = useMemo(() => filterMathSnippets(mathCategory), [mathCategory]);
   const filteredBlocks = useMemo(() => filterBlockSnippets(blockCategory), [blockCategory]);
+  const popoverRef = useRef<HTMLElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (resultsRef.current) resultsRef.current.scrollTop = 0;
   }, [deferredQuery, symbolCategory]);
+
+  useEffect(() => {
+    const focusTimer = window.requestAnimationFrame(() => searchRef.current?.focus());
+    const closeFromOutside = (event: PointerEvent) => {
+      if (!popoverRef.current?.contains(event.target as Node)) onClose(false);
+    };
+    const closeFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose(true);
+    };
+    const closeFromWindowBlur = () => onClose(false);
+    document.addEventListener("pointerdown", closeFromOutside);
+    window.addEventListener("keydown", closeFromKeyboard);
+    window.addEventListener("blur", closeFromWindowBlur);
+    return () => {
+      window.cancelAnimationFrame(focusTimer);
+      document.removeEventListener("pointerdown", closeFromOutside);
+      window.removeEventListener("keydown", closeFromKeyboard);
+      window.removeEventListener("blur", closeFromWindowBlur);
+    };
+  }, [onClose]);
+
   return (
-    <section className="insert-shelf" aria-label="Insert LaTeX">
-      <button className="shelf-handle" onClick={onClose} aria-label="Collapse insert shelf" title="Collapse"><ChevronDown size={14} /></button>
-      <div className="shelf-toolbar">
-        <div className="shelf-tabs" role="tablist" aria-label="Insert categories">
+    <section ref={popoverRef} className="insert-popover" role="dialog" aria-modal="false" aria-label="Insert LaTeX">
+      <header className="insert-popover-header">
+        <strong>Insert</strong>
+        {category === "symbols" && <label className="shelf-search"><Search size={13} aria-hidden="true" /><span className="sr-only">Search symbols</span><input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim()) setSymbolCategory("All"); }} placeholder="Search name or command" /></label>}
+        <button className="icon-button shelf-close" onClick={() => onClose(true)} aria-label="Close Insert" title="Close"><X size={14} /></button>
+      </header>
+      <div className="insert-popover-layout">
+        <div className="shelf-tabs" role="tablist" aria-orientation="vertical" aria-label="Insert categories">
           <ShelfTab category="symbols" current={category} set={setCategory}><FunctionSquare size={14} /><span>Symbols</span></ShelfTab>
           <ShelfTab category="math" current={category} set={setCategory}><Sigma size={14} /><span>Math</span></ShelfTab>
           <ShelfTab category="blocks" current={category} set={setCategory}><PanelsTopLeft size={14} /><span>Blocks</span></ShelfTab>
           <ShelfTab category="figures" current={category} set={setCategory}><Image size={14} /><span>Figures</span></ShelfTab>
           <ShelfTab category="tables" current={category} set={setCategory}><Table2 size={14} /><span>Tables</span></ShelfTab>
         </div>
-        {category === "symbols" && <label className="shelf-search"><Search size={13} aria-hidden="true" /><span className="sr-only">Search symbols</span><input value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim()) setSymbolCategory("All"); }} placeholder="Search name or command" /></label>}
-        <button className="icon-button shelf-close" onClick={onClose} aria-label="Close insert shelf" title="Close"><X size={14} /></button>
-      </div>
-      <div className="shelf-body">
-        {category === "symbols" && <div className="symbol-browser">
-          <div className="symbol-category-filter" role="toolbar" aria-label="Symbol categories">
-            {symbolCategories.map((item) => <button key={item} className={item === symbolCategory ? "selected" : ""} aria-pressed={item === symbolCategory} onClick={() => setSymbolCategory(item)}>{item}</button>)}
-          </div>
-          <div ref={resultsRef} className="symbol-results" aria-live="polite">
-            {filteredSymbols.length > 0 ? <div className="symbol-grid">{filteredSymbols.map((item) => <InsertButton key={`${item.category}-${item.latex}`} label={item.glyph} latex={item.latex} title={`${item.name} · ${item.latex}`} command={item.latex} />)}</div> : <div className="symbol-empty"><strong>No matching symbols</strong><span>Try a name such as “arrow”, “subset”, or a command such as “\\lambda”.</span></div>}
-          </div>
-        </div>}
-        {category === "math" && <div className="snippet-browser">
-          <div className="snippet-category-filter" role="toolbar" aria-label="Math categories">
-            {mathSnippetCategories.map((item) => <button key={item} className={item === mathCategory ? "selected" : ""} aria-pressed={item === mathCategory} onClick={() => setMathCategory(item)}>{item}</button>)}
-          </div>
-          <div className="snippet-results"><div className="rich-snippet-grid">{filteredMath.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="math" />)}</div></div>
-        </div>}
-        {category === "blocks" && <div className="snippet-browser">
-          <div className="snippet-category-filter" role="toolbar" aria-label="Block categories">
-            {blockSnippetCategories.map((item) => <button key={item} className={item === blockCategory ? "selected" : ""} aria-pressed={item === blockCategory} onClick={() => setBlockCategory(item)}>{item}</button>)}
-          </div>
-          <div className="snippet-results"><div className="rich-snippet-grid">{filteredBlocks.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind={snippet.blockCategory === "Code" ? "code" : snippet.blockCategory === "Lists" ? "list" : "block"} />)}</div></div>
-        </div>}
-        {category === "figures" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{figureSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="figure" />)}</div></div>}
-        {category === "tables" && <TableBuilder />}
+        <div className="shelf-body">
+          {category === "symbols" && <div className="symbol-browser">
+            <div className="symbol-category-filter" role="toolbar" aria-label="Symbol categories">
+              {symbolCategories.map((item) => <button key={item} className={item === symbolCategory ? "selected" : ""} aria-pressed={item === symbolCategory} onClick={() => setSymbolCategory(item)}>{item}</button>)}
+            </div>
+            <div ref={resultsRef} className="symbol-results" aria-live="polite">
+              {filteredSymbols.length > 0 ? <div className="symbol-grid">{filteredSymbols.map((item) => <InsertButton key={`${item.category}-${item.latex}`} label={item.glyph} latex={item.latex} title={`${item.name} · ${item.latex}`} command={item.latex} />)}</div> : <div className="symbol-empty"><strong>No matching symbols</strong><span>Try a name such as “arrow”, “subset”, or a command such as “\\lambda”.</span></div>}
+            </div>
+          </div>}
+          {category === "math" && <div className="snippet-browser">
+            <div className="snippet-category-filter" role="toolbar" aria-label="Math categories">
+              {mathSnippetCategories.map((item) => <button key={item} className={item === mathCategory ? "selected" : ""} aria-pressed={item === mathCategory} onClick={() => setMathCategory(item)}>{item}</button>)}
+            </div>
+            <div className="snippet-results"><div className="rich-snippet-grid">{filteredMath.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="math" />)}</div></div>
+          </div>}
+          {category === "blocks" && <div className="snippet-browser">
+            <div className="snippet-category-filter" role="toolbar" aria-label="Block categories">
+              {blockSnippetCategories.map((item) => <button key={item} className={item === blockCategory ? "selected" : ""} aria-pressed={item === blockCategory} onClick={() => setBlockCategory(item)}>{item}</button>)}
+            </div>
+            <div className="snippet-results"><div className="rich-snippet-grid">{filteredBlocks.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind={snippet.blockCategory === "Code" ? "code" : snippet.blockCategory === "Lists" ? "list" : "block"} />)}</div></div>
+          </div>}
+          {category === "figures" && <div className="snippet-results standalone"><div className="rich-snippet-grid">{figureSnippets.map((snippet) => <SnippetCard key={snippet.id} snippet={snippet} kind="figure" />)}</div></div>}
+          {category === "tables" && <TableBuilder />}
+        </div>
       </div>
     </section>
   );

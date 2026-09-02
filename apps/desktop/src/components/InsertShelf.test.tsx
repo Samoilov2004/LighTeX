@@ -3,6 +3,22 @@ import { describe, expect, it, vi } from "vitest";
 import { InsertShelf } from "./InsertShelf";
 
 describe("InsertShelf", () => {
+  it("renders as a floating dialog and closes with Escape", () => {
+    const close = vi.fn();
+    render(<InsertShelf onClose={close} />);
+    expect(screen.getByRole("dialog", { name: "Insert LaTeX" })).toHaveClass("insert-popover");
+    expect(screen.queryByRole("button", { name: /collapse insert shelf/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).toHaveBeenCalledWith(true);
+  });
+
+  it("closes when clicking outside the palette", () => {
+    const close = vi.fn();
+    render(<><InsertShelf onClose={close} /><button>Outside</button></>);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
+    expect(close).toHaveBeenCalledWith(false);
+  });
+
   it("filters symbols by human name and LaTeX command", async () => {
     render(<InsertShelf onClose={vi.fn()} />);
     fireEvent.change(screen.getByPlaceholderText("Search name or command"), { target: { value: "subset" } });
