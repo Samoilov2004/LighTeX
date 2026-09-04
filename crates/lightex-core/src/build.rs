@@ -153,7 +153,7 @@ fn parse_diagnostics_from(
     root: &Path,
     working_directory: &Path,
 ) -> Vec<BuildDiagnosticGroup> {
-    let file_line = Regex::new(r"(?m)^(.+?\.tex):(\d+):\s*(.+)$").unwrap();
+    let file_line = Regex::new(r"(?m)^(.+?\.(?:tex|sty|cls|ltx|bib)):(\d+):\s*(.+)$").unwrap();
     let warning = Regex::new(r"(?mi)^(?:LaTeX|Package .+?) Warning:\s*(.+)$").unwrap();
     let error = Regex::new(r"(?m)^!\s*(.+)$").unwrap();
     let mut diagnostics = Vec::new();
@@ -164,7 +164,7 @@ fn parse_diagnostics_from(
             severity: DiagnosticSeverity::Error,
             relative_path: relative,
             line: capture.get(2).and_then(|value| value.as_str().parse().ok()),
-            message: capture.get(3).unwrap().as_str().trim().to_owned(),
+            message: complete_wrapped_message(log, &capture),
         });
     }
     for capture in error.captures_iter(log) {
@@ -202,6 +202,34 @@ fn parse_diagnostics_from(
         }
     }
     groups
+}
+
+fn complete_wrapped_message(log: &str, capture: &regex::Captures<'_>) -> String {
+    let mut message = capture.get(3).unwrap().as_str().trim().to_owned();
+    let Some(full_match) = capture.get(0) else {
+        return message;
+    };
+    let remainder = log.get(full_match.end()..).unwrap_or_default();
+    let continuation = remainder
+        .strip_prefix("\r\n")
+        .or_else(|| remainder.strip_prefix('\n'))
+        .and_then(|rest| rest.lines().next())
+        .map(str::trim)
+        .unwrap_or_default();
+    let looks_like_continuation = !continuation.is_empty()
+        && continuation.len() <= 48
+        && continuation
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric)
+        && !continuation.starts_with("LaTeX")
+        && !continuation.starts_with("Package")
+        && !continuation.starts_with("Latexmk")
+        && !continuation.starts_with("l.");
+    if looks_like_continuation && message.chars().last().is_some_and(char::is_alphanumeric) {
+        message.push_str(continuation);
+    }
+    message
 }
 
 fn diagnostic_path(raw: &str, root: &Path, working_directory: &Path) -> Option<String> {
@@ -316,6 +344,32 @@ mod tests {
         assert_eq!(
             diagnostics[0].primary.relative_path.as_deref(),
             Some("notes/main.tex")
+        );
+    }
+
+    #[test]
+    fn maps_wrapped_package_errors_from_project_style_files() {
+        let temporary = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        fs::create_dir(root.join("styles")).unwrap();
+        fs::write(
+            root.join("styles/mathnotes.sty"),
+            "\\PackageError{mathnotes}{}{}\n",
+        )
+        .unwrap();
+        let log = "./styles/mathnotes.sty:7: Package mathnotes Error: This template requires XeLaT\neX.\n";
+
+        let diagnostics = parse_diagnostics(log, &root);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].primary.relative_path.as_deref(),
+            Some("styles/mathnotes.sty")
+        );
+        assert_eq!(diagnostics[0].primary.line, Some(7));
+        assert_eq!(
+            diagnostics[0].primary.message,
+            "Package mathnotes Error: This template requires XeLaTeX."
         );
     }
 

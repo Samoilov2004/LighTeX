@@ -20,7 +20,7 @@ import { WindowDragRegion } from "./WindowDragRegion";
 import type { ProjectVersionSummary, SyncTeXPdfTarget } from "../types";
 import { useModalFocus } from "../useModalFocus";
 import { RestoreVersionDialog, SaveVersionDialog, VersionsPanel } from "./VersionsPanel";
-import { buildErrorEntryPaths } from "../buildDiagnostics";
+import { buildErrorEntryPaths, buildFailurePresentation } from "../buildDiagnostics";
 
 export function Workspace() {
   const state = useAppStore();
@@ -49,6 +49,9 @@ export function Workspace() {
     () => preview ? new Set<string>() : buildErrorEntryPaths(state.buildResult),
     [preview, state.buildResult],
   );
+  const buildFailure = useMemo(() => !preview && state.buildState === "failure"
+    ? buildFailurePresentation(state.buildResult, state.entries, state.config.latexEngine, state.buildFailureMessage)
+    : null, [preview, state.buildState, state.buildResult, state.entries, state.config.latexEngine, state.buildFailureMessage]);
   const syncExecutable = state.activeToolchain.synctex?.path;
   const acceptPdfOutlinePages = useCallback((pages: Record<string, number>) => {
     useAppStore.setState((current) => current.versionPreview
@@ -331,7 +334,10 @@ export function Workspace() {
             </div>
             {state.pdfVisible && <>
               <ResizeDivider axis="x" onMove={(delta) => setEditorFraction((fraction) => Math.max(0.3, Math.min(0.7, fraction + delta / Math.max(700, window.innerWidth - sidebarWidth))))} />
-              <PdfPreview base64={displayedPdf} target={pdfTarget} outline={displayedOutline} onOutlinePages={acceptPdfOutlinePages} onInverse={async (page, x, y) => {
+              <PdfPreview base64={buildFailure ? null : displayedPdf} failure={buildFailure} target={pdfTarget} outline={displayedOutline} onOutlinePages={acceptPdfOutlinePages} onRecover={async (engine) => {
+                if (engine) await state.updateConfig({ latexEngine: engine });
+                await useAppStore.getState().build();
+              }} onInverse={async (page, x, y) => {
                 if (!state.project || !syncExecutable) return;
                 if (preview) {
                   const target = await api.synctexProjectVersionInverse(state.project.id, preview.version.id, syncExecutable, page, x, y);

@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ChevronLeft, ChevronRight, Maximize2, Minus, Plus, Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight, CircleX, Maximize2, Minus, Plus, Search, X } from "lucide-react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import type { OutlineItem, SyncTeXPdfTarget } from "../types";
+import type { BuildFailurePresentation } from "../buildDiagnostics";
 import { pdfjs } from "../pdf";
 import { findOutlinePages, findOutlinePagesFromBookmarks, type PdfBookmarkPage } from "../outlinePages";
+import { BuildLogPopover, type BuildLogAnchor } from "./BuildLogPopover";
 
 interface PdfPreviewProps {
   base64: string | null;
   target: SyncTeXPdfTarget | null;
   outline: OutlineItem[];
+  failure?: BuildFailurePresentation | null;
   onOutlinePages(pages: Record<string, number>): void;
   onInverse(page: number, x: number, yFromTop: number): void;
+  onRecover(engine: BuildFailurePresentation["suggestedEngine"]): void;
 }
 
-export function PdfPreview({ base64, target, outline, onOutlinePages, onInverse }: PdfPreviewProps) {
+export function PdfPreview({ base64, target, outline, failure = null, onOutlinePages, onInverse, onRecover }: PdfPreviewProps) {
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(0.9);
@@ -175,11 +180,16 @@ export function PdfPreview({ base64, target, outline, onOutlinePages, onInverse 
 
   if (!base64) {
     return (
-      <section className="pdf-pane empty-pdf" aria-label="PDF preview">
-        <div className="empty-state compact">
+      <section className={`pdf-pane empty-pdf ${failure ? "build-failed" : ""}`} aria-label="PDF preview">
+        <div className="pdf-toolbar">
+          <strong>PDF</strong>
+          <div className="toolbar-spacer" />
+          {failure && <span className="pdf-failed-status"><CircleX size={12} aria-hidden="true" />Failed</span>}
+        </div>
+        {failure ? <PdfBuildFailure failure={failure} onRecover={onRecover} /> : <div className="empty-state compact">
           <span className="empty-state-title">PDF Preview</span>
           <span>Compile the main document to see the result.</span>
-        </div>
+        </div>}
       </section>
     );
   }
@@ -235,6 +245,55 @@ export function PdfPreview({ base64, target, outline, onOutlinePages, onInverse 
       </div>
     </section>
   );
+}
+
+function PdfBuildFailure({ failure, onRecover }: {
+  failure: BuildFailurePresentation;
+  onRecover(engine: BuildFailurePresentation["suggestedEngine"]): void;
+}) {
+  const [logAnchor, setLogAnchor] = useState<BuildLogAnchor | null>(null);
+
+  useEffect(() => setLogAnchor(null), [failure.log, failure.detail]);
+
+  const closeLog = useCallback((restoreFocus = false) => {
+    setLogAnchor((current) => {
+      if (restoreFocus) current?.trigger.focus({ preventScroll: true });
+      return null;
+    });
+  }, []);
+
+  const openLog = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const trigger = event.currentTarget;
+    const rect = trigger.getBoundingClientRect();
+    const bounds = trigger.closest(".pdf-pane")?.getBoundingClientRect();
+    setLogAnchor({
+      trigger,
+      rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height },
+      bounds: bounds ? { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left, width: bounds.width, height: bounds.height } : undefined,
+    });
+  };
+
+  return <div className="pdf-build-failure" role="alert" aria-labelledby="pdf-build-failure-title">
+    <div className="pdf-build-failure-content">
+      <CircleX size={20} strokeWidth={1.7} aria-hidden="true" />
+      <h2 id="pdf-build-failure-title">{failure.title}</h2>
+      <p>{failure.detail}</p>
+      {failure.location && <code>{failure.location}</code>}
+      <div className="pdf-build-failure-actions">
+        <button type="button" className="primary-button compact" onClick={() => onRecover(failure.suggestedEngine)}>
+          {failure.suggestedEngine ? `Switch to ${engineName(failure.suggestedEngine)} & Recompile` : "Recompile"}
+        </button>
+        <button type="button" className="secondary-button compact" onClick={openLog}>View Log</button>
+      </div>
+    </div>
+    {logAnchor && createPortal(<BuildLogPopover anchor={logAnchor} log={failure.log} failed onClose={closeLog} />, document.body)}
+  </div>;
+}
+
+function engineName(engine: NonNullable<BuildFailurePresentation["suggestedEngine"]>): string {
+  if (engine === "xeLaTex") return "XeLaTeX";
+  if (engine === "luaLaTex") return "LuaLaTeX";
+  return "pdfLaTeX";
 }
 
 type PdfOutlineNode = {

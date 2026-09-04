@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 export interface BuildLogAnchor {
   rect: Pick<DOMRect, "top" | "right" | "bottom" | "left" | "width" | "height">;
+  bounds?: Pick<DOMRect, "top" | "right" | "bottom" | "left" | "width" | "height">;
   trigger: HTMLElement;
 }
 
@@ -14,7 +15,7 @@ export function BuildLogPopover({ anchor, log, failed, onClose }: {
 }) {
   const panel = useRef<HTMLElement>(null);
   const [copied, setCopied] = useState(false);
-  const position = useMemo(() => popoverPosition(anchor.rect), [anchor]);
+  const position = useMemo(() => popoverPosition(anchor.rect, anchor.bounds), [anchor]);
 
   useEffect(() => {
     panel.current?.focus({ preventScroll: true });
@@ -77,11 +78,13 @@ export function BuildLogPopover({ anchor, log, failed, onClose }: {
   </section>;
 }
 
-function popoverPosition(rect: BuildLogAnchor["rect"]): CSSProperties {
+function popoverPosition(rect: BuildLogAnchor["rect"], bounds?: BuildLogAnchor["bounds"]): CSSProperties {
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const width = Math.min(580, viewportWidth - 24);
-  const left = Math.max(12, Math.min(viewportWidth - width - 12, rect.right - width + 36));
+  const boundaryLeft = Math.max(0, bounds?.left ?? 0);
+  const boundaryRight = Math.min(viewportWidth, bounds?.right ?? viewportWidth);
+  const width = Math.min(580, Math.max(280, boundaryRight - boundaryLeft - 24));
+  const left = Math.max(boundaryLeft + 12, Math.min(boundaryRight - width - 12, rect.right - width + 36));
   const top = Math.min(rect.bottom + 5, viewportHeight - 194);
   const maxHeight = Math.max(180, viewportHeight - top - 34);
   const pointer = Math.max(24, Math.min(width - 24, rect.left + rect.width / 2 - left));

@@ -99,6 +99,7 @@ interface AppState {
   completion: ProjectCompletionIndex;
   buildState: BuildState;
   buildResult: BuildResult | null;
+  buildFailureMessage: string | null;
   pdfBase64: string | null;
   statusMessage: string;
   error: string | null;
@@ -178,6 +179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   completion: emptyCompletion,
   buildState: "idle",
   buildResult: null,
+  buildFailureMessage: null,
   pdfBase64: null,
   statusMessage: "Ready",
   error: null,
@@ -192,7 +194,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async initialize() {
     if (!isDesktop()) {
       const preview = new URLSearchParams(window.location.search).get("preview");
-      if (preview === "workspace" || preview === "conflict" || preview === "problems" || preview === "versions" || preview === "version-readonly") {
+      if (preview === "workspace" || preview === "conflict" || preview === "problems" || preview === "build-recovery" || preview === "versions" || preview === "version-readonly") {
         const main = previewDocument("main.tex", "\\documentclass[11pt]{article}\n\\usepackage{amsmath,amssymb}\n\\title{Spectral Methods for Elliptic Operators}\n\\author{A. Researcher}\n\\begin{document}\n\\maketitle\n\\section{Introduction}\nLet $A$ be a self-adjoint operator on a Hilbert space.\n\\section{Main Result}\n\\begin{equation}\n  \\lambda_k \\sim C k^{2/n}.\n\\end{equation}\n\\subsection{Proof Strategy}\nWe combine compactness with the min-max principle.\n\\end{document}\n");
         const notes = previewDocument(
           "sections/notes.tex",
@@ -202,6 +204,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         const previewEntries: ProjectEntry[] = [
           { name: "sections", relativePath: "sections", isDirectory: true, children: [{ name: "notes.tex", relativePath: "sections/notes.tex", isDirectory: false, children: [] }] },
+          ...(preview === "build-recovery" ? [{ name: "styles", relativePath: "styles", isDirectory: true, children: [{ name: "mathnotes.sty", relativePath: "styles/mathnotes.sty", isDirectory: false, children: [] }] }] : []),
           { name: "figures", relativePath: "figures", isDirectory: true, children: [] },
           { name: "main.tex", relativePath: "main.tex", isDirectory: false, children: [] },
         ];
@@ -213,7 +216,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (preview === "conflict") main.externalChange = "modified";
         set({
           phase: "project",
-          config: { ...defaultConfig, texProvider: "system" },
+          config: { ...defaultConfig, texProvider: "system", latexEngine: preview === "build-recovery" ? "luaLaTex" : defaultConfig.latexEngine },
           project: { id: "preview-project", name: "SpectralArticle", rootPath: "/Preview/SpectralArticle", mainDocument: "main.tex" },
           entries: previewEntries,
           documents: { "main.tex": main, "sections/notes.tex": notes },
@@ -230,7 +233,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             "main.tex:9:Main Result": 2,
             "main.tex:13:Proof Strategy": 2,
           },
-          buildState: preview === "problems" ? "failure" : "idle",
+          buildState: preview === "problems" || preview === "build-recovery" ? "failure" : "idle",
           versions: savedVersions,
           versionsOpen: preview === "versions",
           versionPreview: preview === "version-readonly" ? {
@@ -293,8 +296,25 @@ export const useAppStore = create<AppState>((set, get) => ({
             projectPdfPath: null,
             missingPackageFile: null,
             diagnostics: [{ primary: { severity: "error", relativePath: "sections/notes.tex", line: 2, message: "Undefined control sequence. Check the command spelling or required package." }, related: [{ severity: "error", relativePath: null, line: null, message: "Compilation stopped at the first error." }] }],
+          } : preview === "build-recovery" ? {
+            succeeded: false,
+            log: [
+              "This is LuaHBTeX, Version 1.22.0 (TeX Live 2026)",
+              "(./main.tex",
+              "(./styles/mathnotes.sty",
+              "./styles/mathnotes.sty:7: Package mathnotes Error: This template requires XeLaT",
+              "eX.",
+              "l.7 \\PackageError{mathnotes}{This template requires XeLaTeX.}{}",
+              "! Emergency stop.",
+              "No output PDF file produced.",
+            ].join("\n"),
+            previewPdfPath: null,
+            projectPdfPath: null,
+            missingPackageFile: null,
+            diagnostics: [{ primary: { severity: "error", relativePath: "styles/mathnotes.sty", line: null, message: "Package mathnotes Error: This template requires XeLaTeX." }, related: [] }],
           } : null,
-          statusMessage: preview === "problems" ? "Build failed · 1 problem" : "Browser preview",
+          buildFailureMessage: null,
+          statusMessage: preview === "problems" ? "Build failed · 1 problem" : preview === "build-recovery" ? "Build failed · Details available" : "Browser preview",
         });
       } else if (preview === "setup") {
         set({
@@ -451,6 +471,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         outlineExpanded: session?.outlineExpanded ?? true,
         outlineHeight: Math.max(112, session?.outlineHeight ?? 180),
         buildResult: null,
+        buildFailureMessage: null,
         pdfBase64: null,
         buildState: "idle",
         versionsOpen: false,
@@ -711,7 +732,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     const previousTarget = firstBuildDiagnosticTarget(get().buildResult, get().entries);
-    set({ buildState: "building", statusMessage: "Compiling…", error: null });
+    set({ buildState: "building", buildFailureMessage: null, statusMessage: "Compiling…", error: null });
     try {
       const result = await api.build({
         projectId: project.id,
@@ -725,12 +746,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (result.previewPdfPath) pdfBase64 = await api.readPreviewPdf(project.id, result.previewPdfPath);
       set({
         buildResult: result,
+        buildFailureMessage: null,
         pdfBase64,
         outlinePages: result.succeeded ? {} : get().outlinePages,
         buildState: result.succeeded ? "success" : "failure",
         statusMessage: result.succeeded
           ? "Build succeeded"
-          : `Build failed · ${result.diagnostics.length} problem${result.diagnostics.length === 1 ? "" : "s"}`,
+          : result.diagnostics.length > 0
+            ? `Build failed · ${result.diagnostics.length} problem${result.diagnostics.length === 1 ? "" : "s"}`
+            : "Build failed · Details available",
       });
       const target = firstBuildDiagnosticTarget(result, get().entries);
       if (!result.succeeded && target && diagnosticTargetKey(target) !== diagnosticTargetKey(previousTarget)) {
@@ -739,8 +763,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch (error) {
       const message = String(error);
-      if (message.toLowerCase().includes("cancel")) set({ buildState: "idle", statusMessage: "Build cancelled" });
-      else set({ buildState: "failure", statusMessage: "Build failed", error: message });
+      if (message.toLowerCase().includes("cancel")) set({ buildState: "idle", buildFailureMessage: null, statusMessage: "Build cancelled" });
+      else set({ buildState: "failure", buildResult: null, buildFailureMessage: message, statusMessage: "Build failed · Details available", error: null });
     }
   },
 
@@ -1053,6 +1077,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         notice: `Restored “${version.name}”.`,
         pdfBase64,
         buildResult: null,
+        buildFailureMessage: null,
         buildState: "idle",
         outlinePages: {},
         statusMessage: "Version restored",

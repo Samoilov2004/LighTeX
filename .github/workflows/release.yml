@@ -6,7 +6,7 @@ on:
       version:
         description: Stable release version
         required: true
-        default: "1.1.5"
+        default: "1.1.6"
       publish:
         description: Publish the GitHub Release after every package passes
         type: boolean
@@ -129,7 +129,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           TAG="v${RELEASE_VERSION}"
-          NOTES="LighTex ${RELEASE_VERSION} refines the project workspace with a compact floating Insert panel, a native-looking split Recompile control, consistently rounded editor tabs, and corrected full-width TeX provider rows in Settings. Insert remains keyboard accessible, closes on outside click or Escape, and preserves the searchable symbol workflow. Packages are provided for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
+          NOTES="LighTex ${RELEASE_VERSION} makes failed builds easier to understand. Errors in project .sty, .cls, .ltx, and .bib files now navigate to the exact source line when available. When TeX cannot provide a usable source location, the PDF pane shows a persistent recovery view with a concise explanation, a suggested engine switch when detected, Recompile, and an on-demand Build Log. The log stays closed until View Log is selected and remains contained within the PDF pane. Packages are provided for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "${{ github.repository }}" --latest --title "LighTex ${RELEASE_VERSION}" --notes "$NOTES"
           else
