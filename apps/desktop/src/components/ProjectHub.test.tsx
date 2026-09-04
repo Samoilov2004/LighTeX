@@ -48,10 +48,11 @@ describe("ProjectHub", () => {
     expect(strict).toBeChecked();
     expect(python).toBeChecked();
     expect(sql).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Restart in each chapter/i })).toBeChecked();
 
     fireEvent.click(colorful);
     fireEvent.click(sql);
-    expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-colorful.png"));
+    expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-colorful-per-chapter.png"));
 
     const templates = screen.getByRole("region", { name: "Templates" });
     fireEvent.click(within(templates).getByRole("button", { name: /Homework Assignment/i }));
@@ -63,6 +64,10 @@ describe("ProjectHub", () => {
     fireEvent.click(screen.getByRole("radio", { name: "None" }));
     expect(screen.getByRole("checkbox", { name: "Python" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "SQL" })).toBeDisabled();
+    expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-none-per-chapter.png"));
+
+    fireEvent.click(screen.getByRole("radio", { name: /Include chapter number/i }));
+    expect(screen.getByRole("radio", { name: /Include chapter number/i })).toBeChecked();
     expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-none.png"));
 
     fireEvent.click(screen.getByRole("button", { name: "Full Page" }));

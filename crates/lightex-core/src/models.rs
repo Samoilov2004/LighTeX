@@ -678,12 +678,21 @@ pub enum TemplateCodeLanguage {
     Shell,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TemplateSectionNumbering {
+    Hierarchical,
+    PerChapter,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct TemplateInstantiationOptions {
     pub code_style: Option<TemplateCodeStyle>,
     pub code_languages: Option<Vec<TemplateCodeLanguage>>,
+    pub section_numbering: Option<TemplateSectionNumbering>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -704,6 +713,8 @@ pub struct BundledTemplateManifestV2 {
     pub code_languages: Vec<TemplateCodeLanguage>,
     pub default_code_style: Option<TemplateCodeStyle>,
     pub default_code_languages: Vec<TemplateCodeLanguage>,
+    pub section_numberings: Vec<TemplateSectionNumbering>,
+    pub default_section_numbering: Option<TemplateSectionNumbering>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

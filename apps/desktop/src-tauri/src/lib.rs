@@ -17,9 +17,9 @@ use lightex_core::{
     ProjectVersionId, ProjectVersionSummary, ReplacePreview, RuntimeEnvironment,
     RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant, SaveOutcome, SearchQuery, SearchResult,
     StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget, TemplateCodeStyle,
-    TemplateInstantiationOptions, TemplateReview, ToolchainStatus, VersionChangeSummary,
-    VersionFileDiff, VersionLineSummary, VersionPreviewEvent, VersionPreviewStatus,
-    VersionRestoreOutcome, VersionSnapshotReview,
+    TemplateInstantiationOptions, TemplateReview, TemplateSectionNumbering, ToolchainStatus,
+    VersionChangeSummary, VersionFileDiff, VersionLineSummary, VersionPreviewEvent,
+    VersionPreviewStatus, VersionRestoreOutcome, VersionSnapshotReview,
 };
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -142,11 +142,17 @@ fn list_bundled_templates(app: AppHandle) -> Result<Vec<BundledTemplateManifestV
 fn bundled_template_preview(
     template: String,
     style: Option<TemplateCodeStyle>,
+    section_numbering: Option<TemplateSectionNumbering>,
     app: AppHandle,
 ) -> Result<String, String> {
     let templates_root = bundled_templates_root(&app)?;
-    let path = lightex_core::project::bundled_template_preview(&templates_root, &template, style)
-        .map_err(String::from)?;
+    let path = lightex_core::project::bundled_template_preview(
+        &templates_root,
+        &template,
+        style,
+        section_numbering,
+    )
+    .map_err(String::from)?;
     fs::read(path)
         .map(|bytes| STANDARD.encode(bytes))
         .map_err(|error| error.to_string())

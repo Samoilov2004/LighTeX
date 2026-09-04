@@ -1,4 +1,4 @@
-import type { BundledTemplateManifestV2, TemplateCodeStyle } from "./types";
+import type { BundledTemplateManifestV2, TemplateCodeStyle, TemplateSectionNumbering } from "./types";
 
 import blankDocumentManifest from "../../../templates/blank-document/template.json";
 import blankDocumentPreview from "../../../templates/blank-document/preview.png";
@@ -8,6 +8,9 @@ import courseNotesManifest from "../../../templates/course-notes/template.json";
 import courseNotesNonePreview from "../../../templates/course-notes/preview-none.png";
 import courseNotesStrictPreview from "../../../templates/course-notes/preview-strict.png";
 import courseNotesColorfulPreview from "../../../templates/course-notes/preview-colorful.png";
+import courseNotesNonePerChapterPreview from "../../../templates/course-notes/preview-none-per-chapter.png";
+import courseNotesStrictPerChapterPreview from "../../../templates/course-notes/preview-strict-per-chapter.png";
+import courseNotesColorfulPerChapterPreview from "../../../templates/course-notes/preview-colorful-per-chapter.png";
 import scientificArticleManifest from "../../../templates/scientific-article/template.json";
 import scientificArticlePreview from "../../../templates/scientific-article/preview.png";
 import labReportManifest from "../../../templates/lab-report/template.json";
@@ -33,10 +36,12 @@ const manifests = rawManifests.map((manifest) => {
     codeLanguages: record.codeLanguages ?? [],
     defaultCodeStyle: record.defaultCodeStyle ?? null,
     defaultCodeLanguages: record.defaultCodeLanguages ?? [],
+    sectionNumberings: record.sectionNumberings ?? [],
+    defaultSectionNumbering: record.defaultSectionNumbering ?? null,
   } as unknown as BundledTemplateManifestV2;
 });
 
-const previews: Record<string, Partial<Record<TemplateCodeStyle | "default", string>>> = {
+const previews: Record<string, Record<string, string | undefined>> = {
   "blank-document": { default: blankDocumentPreview },
   homework: { default: homeworkPreview },
   "course-notes": {
@@ -44,6 +49,9 @@ const previews: Record<string, Partial<Record<TemplateCodeStyle | "default", str
     none: courseNotesNonePreview,
     strict: courseNotesStrictPreview,
     colorful: courseNotesColorfulPreview,
+    "none-perChapter": courseNotesNonePerChapterPreview,
+    "strict-perChapter": courseNotesStrictPerChapterPreview,
+    "colorful-perChapter": courseNotesColorfulPerChapterPreview,
   },
   "scientific-article": { default: scientificArticlePreview },
   "lab-report": { default: labReportPreview },
@@ -58,7 +66,12 @@ export const fallbackBundledTemplates = [...manifests].sort((left, right) =>
   || left.name.localeCompare(right.name)
 );
 
-export function fallbackBundledTemplatePreview(id: string, style?: TemplateCodeStyle | null) {
+export function fallbackBundledTemplatePreview(
+  id: string,
+  style?: TemplateCodeStyle | null,
+  sectionNumbering?: TemplateSectionNumbering | null,
+) {
   const preview = previews[id];
-  return (style && preview?.[style]) || preview?.default || null;
+  const composite = style && sectionNumbering ? `${style}-${sectionNumbering}` : null;
+  return (composite && preview?.[composite]) || (style && preview?.[style]) || preview?.default || null;
 }

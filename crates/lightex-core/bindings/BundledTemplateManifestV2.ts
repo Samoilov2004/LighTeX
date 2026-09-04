@@ -3,5 +3,6 @@ import type { BundledTemplateCategory } from "./BundledTemplateCategory";
 import type { LatexEngine } from "./LatexEngine";
 import type { TemplateCodeLanguage } from "./TemplateCodeLanguage";
 import type { TemplateCodeStyle } from "./TemplateCodeStyle";
+import type { TemplateSectionNumbering } from "./TemplateSectionNumbering";
 
-export type BundledTemplateManifestV2 = { schemaVersion: number, id: string, name: string, description: string, category: BundledTemplateCategory, sortOrder: number, engine: LatexEngine, entry: string, preview: string, previewVariants: { [key in string]?: string }, codeStyles: Array<TemplateCodeStyle>, codeLanguages: Array<TemplateCodeLanguage>, defaultCodeStyle: TemplateCodeStyle | null, defaultCodeLanguages: Array<TemplateCodeLanguage>, };
+export type BundledTemplateManifestV2 = { schemaVersion: number, id: string, name: string, description: string, category: BundledTemplateCategory, sortOrder: number, engine: LatexEngine, entry: string, preview: string, previewVariants: { [key in string]?: string }, codeStyles: Array<TemplateCodeStyle>, codeLanguages: Array<TemplateCodeLanguage>, defaultCodeStyle: TemplateCodeStyle | null, defaultCodeLanguages: Array<TemplateCodeLanguage>, sectionNumberings: Array<TemplateSectionNumbering>, defaultSectionNumbering: TemplateSectionNumbering | null, };

@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     BundledTemplateCategory, BundledTemplateManifestV2, CoreError, CoreResult, LatexEngine,
     ProjectEntry, ProjectHandle, ProjectId, TemplateCodeLanguage, TemplateCodeStyle,
-    TemplateInstantiationOptions,
+    TemplateInstantiationOptions, TemplateSectionNumbering,
     paths::{canonical_directory, safe_relative_path},
 };
 
@@ -124,7 +124,8 @@ pub fn create_project_from_template(
     let template = validated_name(template)?;
     let templates_root = canonical_directory(templates_root)?;
     let (source, manifest) = bundled_template(&templates_root, template)?;
-    let (code_style, code_languages) = normalize_template_options(&manifest, options)?;
+    let (code_style, code_languages, section_numbering) =
+        normalize_template_options(&manifest, options)?;
 
     let name = validated_name(name)?;
     let parent = canonical_directory(parent)?;
@@ -136,7 +137,13 @@ pub fn create_project_from_template(
     fs::create_dir(&staging)?;
     let operation = (|| -> CoreResult<()> {
         copy_bundled_template(&source, &staging)?;
-        configure_bundled_template(&manifest, &staging, code_style, &code_languages)?;
+        configure_bundled_template(
+            &manifest,
+            &staging,
+            code_style,
+            &code_languages,
+            section_numbering,
+        )?;
         fs::rename(&staging, &destination)?;
         Ok(())
     })();
@@ -173,6 +180,7 @@ pub fn bundled_template_preview(
     templates_root: &Path,
     template: &str,
     style: Option<TemplateCodeStyle>,
+    section_numbering: Option<TemplateSectionNumbering>,
 ) -> CoreResult<PathBuf> {
     let template = validated_name(template)?;
     let templates_root = canonical_directory(templates_root)?;
@@ -182,8 +190,23 @@ pub fn bundled_template_preview(
             "This preview style is not available for the template.".into(),
         ));
     }
-    let preview = style
-        .and_then(|value| manifest.preview_variants.get(code_style_key(value)))
+    if section_numbering.is_some_and(|value| !manifest.section_numberings.contains(&value)) {
+        return Err(CoreError::Message(
+            "This section numbering is not available for the template.".into(),
+        ));
+    }
+    let composite_key = match (style, section_numbering) {
+        (Some(style), Some(numbering)) => Some(format!(
+            "{}-{}",
+            code_style_key(style),
+            section_numbering_key(numbering)
+        )),
+        _ => None,
+    };
+    let preview = composite_key
+        .as_ref()
+        .and_then(|key| manifest.preview_variants.get(key))
+        .or_else(|| style.and_then(|value| manifest.preview_variants.get(code_style_key(value))))
         .unwrap_or(&manifest.preview);
     let path = fs::canonicalize(source.join(preview))?;
     if !path.starts_with(&source) || !path.is_file() {
@@ -217,6 +240,10 @@ struct BundledTemplateManifestRaw {
     default_code_style: Option<TemplateCodeStyle>,
     #[serde(default)]
     default_code_languages: Vec<TemplateCodeLanguage>,
+    #[serde(default)]
+    section_numberings: Vec<TemplateSectionNumbering>,
+    #[serde(default)]
+    default_section_numbering: Option<TemplateSectionNumbering>,
 }
 
 fn bundled_template(
@@ -284,6 +311,8 @@ fn bundled_template(
             code_languages: raw.code_languages,
             default_code_style: raw.default_code_style,
             default_code_languages: raw.default_code_languages,
+            section_numberings: raw.section_numberings,
+            default_section_numbering: raw.default_section_numbering,
         },
     ))
 }
@@ -336,8 +365,12 @@ fn category_order(category: BundledTemplateCategory) -> u8 {
 fn normalize_template_options(
     manifest: &BundledTemplateManifestV2,
     options: Option<&TemplateInstantiationOptions>,
-) -> CoreResult<(Option<TemplateCodeStyle>, Vec<TemplateCodeLanguage>)> {
-    if manifest.code_styles.is_empty() {
+) -> CoreResult<(
+    Option<TemplateCodeStyle>,
+    Vec<TemplateCodeLanguage>,
+    Option<TemplateSectionNumbering>,
+)> {
+    let (style, languages) = if manifest.code_styles.is_empty() {
         if options.is_some_and(|value| {
             value.code_style.is_some()
                 || value
@@ -350,41 +383,70 @@ fn normalize_template_options(
                 manifest.name
             )));
         }
-        return Ok((None, Vec::new()));
-    }
-    let style = options
-        .and_then(|value| value.code_style)
-        .or(manifest.default_code_style)
-        .ok_or_else(|| {
-            CoreError::InvalidManifest("configurable template has no default code style".into())
-        })?;
-    if !manifest.code_styles.contains(&style) {
-        return Err(CoreError::Message(
-            "Unsupported code style for this template.".into(),
-        ));
-    }
-    let requested = options
-        .and_then(|value| value.code_languages.clone())
-        .unwrap_or_else(|| manifest.default_code_languages.clone());
-    if requested
-        .iter()
-        .any(|language| !manifest.code_languages.contains(language))
-    {
-        return Err(CoreError::Message(
-            "Unsupported code language for this template.".into(),
-        ));
-    }
-    if style == TemplateCodeStyle::None {
-        return Ok((Some(style), Vec::new()));
-    }
-    let requested: HashSet<_> = requested.into_iter().collect();
-    let languages = manifest
-        .code_languages
-        .iter()
-        .copied()
-        .filter(|language| requested.contains(language))
-        .collect();
-    Ok((Some(style), languages))
+        (None, Vec::new())
+    } else {
+        let style = options
+            .and_then(|value| value.code_style)
+            .or(manifest.default_code_style)
+            .ok_or_else(|| {
+                CoreError::InvalidManifest("configurable template has no default code style".into())
+            })?;
+        if !manifest.code_styles.contains(&style) {
+            return Err(CoreError::Message(
+                "Unsupported code style for this template.".into(),
+            ));
+        }
+        let requested = options
+            .and_then(|value| value.code_languages.clone())
+            .unwrap_or_else(|| manifest.default_code_languages.clone());
+        if requested
+            .iter()
+            .any(|language| !manifest.code_languages.contains(language))
+        {
+            return Err(CoreError::Message(
+                "Unsupported code language for this template.".into(),
+            ));
+        }
+        if style == TemplateCodeStyle::None {
+            (Some(style), Vec::new())
+        } else {
+            let requested: HashSet<_> = requested.into_iter().collect();
+            let languages = manifest
+                .code_languages
+                .iter()
+                .copied()
+                .filter(|language| requested.contains(language))
+                .collect();
+            (Some(style), languages)
+        }
+    };
+
+    let section_numbering = if manifest.section_numberings.is_empty() {
+        if options.is_some_and(|value| value.section_numbering.is_some()) {
+            return Err(CoreError::Message(format!(
+                "{} does not support section numbering configuration.",
+                manifest.name
+            )));
+        }
+        None
+    } else {
+        let numbering = options
+            .and_then(|value| value.section_numbering)
+            .or(manifest.default_section_numbering)
+            .ok_or_else(|| {
+                CoreError::InvalidManifest(
+                    "template with configurable section numbering has no default".into(),
+                )
+            })?;
+        if !manifest.section_numberings.contains(&numbering) {
+            return Err(CoreError::Message(
+                "Unsupported section numbering for this template.".into(),
+            ));
+        }
+        Some(numbering)
+    };
+
+    Ok((style, languages, section_numbering))
 }
 
 fn configure_bundled_template(
@@ -392,6 +454,7 @@ fn configure_bundled_template(
     destination: &Path,
     code_style: Option<TemplateCodeStyle>,
     code_languages: &[TemplateCodeLanguage],
+    section_numbering: Option<TemplateSectionNumbering>,
 ) -> CoreResult<()> {
     if manifest.id != "course-notes" {
         return Ok(());
@@ -401,6 +464,13 @@ fn configure_bundled_template(
         &destination.join("notes.sty"),
         "% LighTex:CodeSupport",
         &code_support(style, code_languages),
+    )?;
+    render_marker(
+        &destination.join("notes.sty"),
+        "% LighTex:SectionNumbering",
+        section_numbering_support(
+            section_numbering.unwrap_or(TemplateSectionNumbering::PerChapter),
+        ),
     )?;
     render_marker(
         &destination.join("main.tex"),
@@ -426,6 +496,22 @@ fn code_style_key(style: TemplateCodeStyle) -> &'static str {
         TemplateCodeStyle::None => "none",
         TemplateCodeStyle::Strict => "strict",
         TemplateCodeStyle::Colorful => "colorful",
+    }
+}
+
+fn section_numbering_key(numbering: TemplateSectionNumbering) -> &'static str {
+    match numbering {
+        TemplateSectionNumbering::Hierarchical => "hierarchical",
+        TemplateSectionNumbering::PerChapter => "perChapter",
+    }
+}
+
+fn section_numbering_support(numbering: TemplateSectionNumbering) -> &'static str {
+    match numbering {
+        TemplateSectionNumbering::Hierarchical => "",
+        TemplateSectionNumbering::PerChapter => {
+            "\\renewcommand{\\thesection}{\\arabic{section}}\n\\renewcommand{\\thesubsection}{\\thesection.\\arabic{subsection}}"
+        }
     }
 }
 
@@ -971,6 +1057,7 @@ mod tests {
         let options = TemplateInstantiationOptions {
             code_style: Some(TemplateCodeStyle::None),
             code_languages: Some(vec![TemplateCodeLanguage::Python]),
+            section_numbering: Some(TemplateSectionNumbering::PerChapter),
         };
         let root = create_project_from_template(
             parent.path(),
@@ -1016,6 +1103,7 @@ mod tests {
             let options = TemplateInstantiationOptions {
                 code_style: Some(TemplateCodeStyle::Colorful),
                 code_languages: Some(vec![language]),
+                section_numbering: Some(TemplateSectionNumbering::Hierarchical),
             };
             let root = create_project_from_template(
                 parent.path(),
@@ -1045,6 +1133,7 @@ mod tests {
         let unsupported = TemplateInstantiationOptions {
             code_style: Some(TemplateCodeStyle::Colorful),
             code_languages: Some(vec![TemplateCodeLanguage::Rust]),
+            section_numbering: None,
         };
         assert!(
             create_project_from_template(
@@ -1058,12 +1147,71 @@ mod tests {
         );
         assert!(!parent.path().join("Unsafe").exists());
         assert!(
-            bundled_template_preview(&templates, "homework", Some(TemplateCodeStyle::Colorful),)
-                .is_err()
+            bundled_template_preview(
+                &templates,
+                "homework",
+                Some(TemplateCodeStyle::Colorful),
+                None,
+            )
+            .is_err()
         );
-        let preview =
-            bundled_template_preview(&templates, "course-notes", Some(TemplateCodeStyle::Strict))
-                .unwrap();
+        let preview = bundled_template_preview(
+            &templates,
+            "course-notes",
+            Some(TemplateCodeStyle::Strict),
+            Some(TemplateSectionNumbering::Hierarchical),
+        )
+        .unwrap();
         assert_eq!(preview.file_name().unwrap(), "preview-strict.png");
+    }
+
+    #[test]
+    fn course_notes_supports_both_section_numbering_modes() {
+        let parent = tempfile::tempdir().unwrap();
+        let templates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates");
+
+        for (name, numbering, expected, absent) in [
+            (
+                "Hierarchical",
+                TemplateSectionNumbering::Hierarchical,
+                "\\titleformat{\\section}",
+                "\\renewcommand{\\thesection}{\\arabic{section}}",
+            ),
+            (
+                "PerChapter",
+                TemplateSectionNumbering::PerChapter,
+                "\\renewcommand{\\thesection}{\\arabic{section}}",
+                "% LighTex:SectionNumbering",
+            ),
+        ] {
+            let options = TemplateInstantiationOptions {
+                code_style: Some(TemplateCodeStyle::None),
+                code_languages: Some(Vec::new()),
+                section_numbering: Some(numbering),
+            };
+            let root = create_project_from_template(
+                parent.path(),
+                name,
+                &templates,
+                "course-notes",
+                Some(&options),
+            )
+            .unwrap();
+            let style = fs::read_to_string(root.join("notes.sty")).unwrap();
+            assert!(style.contains(expected));
+            assert!(!style.contains(absent));
+        }
+
+        let local_preview = bundled_template_preview(
+            &templates,
+            "course-notes",
+            Some(TemplateCodeStyle::Strict),
+            Some(TemplateSectionNumbering::PerChapter),
+        )
+        .unwrap();
+        assert_eq!(
+            local_preview.file_name().unwrap(),
+            "preview-strict-per-chapter.png"
+        );
     }
 }

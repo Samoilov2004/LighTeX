@@ -43,6 +43,7 @@ export type { TemplateReview } from "../../../crates/lightex-core/bindings/Templ
 export type { TemplateCodeLanguage } from "../../../crates/lightex-core/bindings/TemplateCodeLanguage";
 export type { TemplateCodeStyle } from "../../../crates/lightex-core/bindings/TemplateCodeStyle";
 export type { TemplateInstantiationOptions } from "../../../crates/lightex-core/bindings/TemplateInstantiationOptions";
+export type { TemplateSectionNumbering } from "../../../crates/lightex-core/bindings/TemplateSectionNumbering";
 export type { ToolExecutable } from "../../../crates/lightex-core/bindings/ToolExecutable";
 export type { ToolchainStatus } from "../../../crates/lightex-core/bindings/ToolchainStatus";
 export type { VersionChangeSummary } from "../../../crates/lightex-core/bindings/VersionChangeSummary";

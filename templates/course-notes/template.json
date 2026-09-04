@@ -11,12 +11,17 @@
   "previewVariants": {
     "none": "preview-none.png",
     "strict": "preview-strict.png",
-    "colorful": "preview-colorful.png"
+    "colorful": "preview-colorful.png",
+    "none-perChapter": "preview-none-per-chapter.png",
+    "strict-perChapter": "preview-strict-per-chapter.png",
+    "colorful-perChapter": "preview-colorful-per-chapter.png"
   },
   "documentClass": "report",
   "tags": ["notes", "mathematics", "theorems", "code"],
   "codeStyles": ["none", "strict", "colorful"],
   "codeLanguages": ["python", "sql", "cpp", "javaScript", "rust", "java", "shell"],
   "defaultCodeStyle": "strict",
-  "defaultCodeLanguages": ["python", "sql"]
+  "defaultCodeLanguages": ["python", "sql"],
+  "sectionNumberings": ["hierarchical", "perChapter"],
+  "defaultSectionNumbering": "perChapter"
 }

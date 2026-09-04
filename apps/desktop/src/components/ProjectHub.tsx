@@ -13,6 +13,7 @@ import type {
   TemplateCodeStyle,
   TemplateInstantiationOptions,
   TemplateReview,
+  TemplateSectionNumbering,
 } from "../types";
 import { renderFirstPagePreview } from "../pdf";
 import { useModalFocus } from "../useModalFocus";
@@ -32,6 +33,7 @@ interface TemplateDraft {
   parent: string;
   codeStyle: TemplateCodeStyle;
   codeLanguages: TemplateCodeLanguage[];
+  sectionNumbering: TemplateSectionNumbering;
 }
 
 const categoryLabels: Record<BundledTemplateCategory, string> = {
@@ -243,8 +245,11 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
   const rail = useRef<HTMLDivElement>(null);
   const templateId = selection.template.id;
   const templateName = selection.template.name;
-  const configurable = selection.kind === "bundled" && selection.template.codeStyles.length > 0;
-  const codeStyle = configurable ? draft.codeStyle : null;
+  const codeConfigurable = selection.kind === "bundled" && selection.template.codeStyles.length > 0;
+  const numberingConfigurable = selection.kind === "bundled" && selection.template.sectionNumberings.length > 0;
+  const configurable = codeConfigurable || numberingConfigurable;
+  const codeStyle = codeConfigurable ? draft.codeStyle : null;
+  const sectionNumbering = numberingConfigurable ? draft.sectionNumbering : null;
   const railSelections: TemplateSelection[] = [
     ...personal.map((template) => ({ kind: "personal" as const, template })),
     ...bundled.map((template) => ({ kind: "bundled" as const, template })),
@@ -270,8 +275,9 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
         path = await api.createProjectFromPersonalTemplate(selection.template.id, draft.parent, draft.name.trim());
       } else {
         const options: TemplateInstantiationOptions | null = configurable ? {
-          codeStyle: draft.codeStyle,
-          codeLanguages: draft.codeStyle === "none" ? [] : draft.codeLanguages,
+          codeStyle: codeConfigurable ? draft.codeStyle : null,
+          codeLanguages: codeConfigurable ? (draft.codeStyle === "none" ? [] : draft.codeLanguages) : null,
+          sectionNumbering,
         } : null;
         await useAppStore.getState().updateConfig({ latexEngine: selection.template.engine });
         path = await api.createProjectFromTemplate(draft.parent, draft.name.trim(), selection.template.id, options);
@@ -292,7 +298,7 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
       <div className={"template-document-preview " + previewMode}>
         <div className="template-document-page">
           {selection.kind === "bundled"
-            ? <BundledTemplateImage template={selection.template} style={codeStyle} />
+            ? <BundledTemplateImage template={selection.template} style={codeStyle} sectionNumbering={sectionNumbering} />
             : <PersonalTemplateImage template={selection.template} />}
         </div>
         <div className="template-preview-pager" aria-label="Template preview page">
@@ -310,7 +316,11 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
           return <div className={"template-rail-item " + (selected ? "selected" : "")} key={key}>
             <button type="button" className="template-rail-select" aria-pressed={selected} onClick={() => onSelect(item)}>
               <span className="template-rail-preview">{item.kind === "bundled"
-                ? <BundledTemplateImage template={item.template} style={item.template.defaultCodeStyle} />
+                ? <BundledTemplateImage
+                    template={item.template}
+                    style={item.template.defaultCodeStyle}
+                    sectionNumbering={item.template.defaultSectionNumbering}
+                  />
                 : <PersonalTemplateImage template={item.template} />}</span>
               <strong>{item.template.name}</strong>
               <small>{category}</small>
@@ -336,7 +346,26 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
             <button type="button" className="secondary-button" onClick={() => void chooseLocation()}>Choose…</button>
           </div>
         </div>
-        {configurable && <>
+        {numberingConfigurable && <fieldset className="template-option-group section-numbering-options">
+          <legend>Section Numbering</legend>
+          <div>
+            {selection.kind === "bundled" && selection.template.sectionNumberings.map((numbering) => (
+              <label className={draft.sectionNumbering === numbering ? "selected" : ""} key={numbering}>
+                <input
+                  className="sr-only"
+                  type="radio"
+                  name="section-numbering"
+                  value={numbering}
+                  checked={draft.sectionNumbering === numbering}
+                  onChange={() => onChange({ ...draft, sectionNumbering: numbering })}
+                />
+                <strong>{numbering === "hierarchical" ? "1.1, 1.2" : "1, 2, 3"}</strong>
+                <small>{numbering === "hierarchical" ? "Include chapter number" : "Restart in each chapter"}</small>
+              </label>
+            ))}
+          </div>
+        </fieldset>}
+        {codeConfigurable && <>
           <fieldset className="template-option-group code-style-options">
             <legend>Code Style</legend>
             <div>{selection.template.codeStyles.map((style) => (
@@ -381,14 +410,22 @@ function CodeStyleSample({ style }: { style: TemplateCodeStyle }) {
   </span>;
 }
 
-function BundledTemplateImage({ template, style }: { template: BundledTemplateManifestV2; style?: TemplateCodeStyle | null }) {
-  const preview = useBundledPreview(template, style);
+function BundledTemplateImage({ template, style, sectionNumbering }: {
+  template: BundledTemplateManifestV2;
+  style?: TemplateCodeStyle | null;
+  sectionNumbering?: TemplateSectionNumbering | null;
+}) {
+  const preview = useBundledPreview(template, style, sectionNumbering);
   return preview ? <img src={preview} alt={template.name + " first-page preview"} /> : <span className="template-preview-loading">Loading preview…</span>;
 }
 
-function useBundledPreview(template: BundledTemplateManifestV2, style?: TemplateCodeStyle | null) {
-  const key = template.id + ":" + (style ?? "default");
-  const fallback = fallbackBundledTemplatePreview(template.id, style);
+function useBundledPreview(
+  template: BundledTemplateManifestV2,
+  style?: TemplateCodeStyle | null,
+  sectionNumbering?: TemplateSectionNumbering | null,
+) {
+  const key = template.id + ":" + (style ?? "default") + ":" + (sectionNumbering ?? "default");
+  const fallback = fallbackBundledTemplatePreview(template.id, style, sectionNumbering);
   const [preview, setPreview] = useState<string | null>(() => previewCache.get(key) ?? fallback);
   useEffect(() => {
     const cached = previewCache.get(key);
@@ -399,14 +436,14 @@ function useBundledPreview(template: BundledTemplateManifestV2, style?: Template
     setPreview(fallback);
     if (!isDesktop()) return;
     let active = true;
-    void api.bundledTemplatePreview(template.id, style ?? null).then((value) => {
+    void api.bundledTemplatePreview(template.id, style ?? null, sectionNumbering ?? null).then((value) => {
       if (!active) return;
       const source = "data:image/png;base64," + value;
       previewCache.set(key, source);
       setPreview(source);
     }).catch(() => {});
     return () => { active = false; };
-  }, [fallback, key, style, template.id]);
+  }, [fallback, key, sectionNumbering, style, template.id]);
   return preview;
 }
 
@@ -492,13 +529,20 @@ function ReviewList({ title, files, muted = false }: { title: string; files: str
 
 function createDraft(selection: TemplateSelection, parent: string): TemplateDraft {
   if (selection.kind === "personal") {
-    return { name: selection.template.name, parent, codeStyle: "strict", codeLanguages: [] };
+    return {
+      name: selection.template.name,
+      parent,
+      codeStyle: "strict",
+      codeLanguages: [],
+      sectionNumbering: "perChapter",
+    };
   }
   return {
     name: selection.template.name,
     parent,
     codeStyle: selection.template.defaultCodeStyle ?? "strict",
     codeLanguages: [...(selection.template.defaultCodeLanguages ?? [])],
+    sectionNumbering: selection.template.defaultSectionNumbering ?? "hierarchical",
   };
 }
 
