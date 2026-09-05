@@ -686,6 +686,22 @@ pub enum TemplateSectionNumbering {
     PerChapter,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TemplateTitlePage {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TemplateProjectStructure {
+    SingleFile,
+    Chapters,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -693,6 +709,8 @@ pub struct TemplateInstantiationOptions {
     pub code_style: Option<TemplateCodeStyle>,
     pub code_languages: Option<Vec<TemplateCodeLanguage>>,
     pub section_numbering: Option<TemplateSectionNumbering>,
+    pub title_page: Option<TemplateTitlePage>,
+    pub project_structure: Option<TemplateProjectStructure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -715,6 +733,10 @@ pub struct BundledTemplateManifestV2 {
     pub default_code_languages: Vec<TemplateCodeLanguage>,
     pub section_numberings: Vec<TemplateSectionNumbering>,
     pub default_section_numbering: Option<TemplateSectionNumbering>,
+    pub title_pages: Vec<TemplateTitlePage>,
+    pub default_title_page: Option<TemplateTitlePage>,
+    pub project_structures: Vec<TemplateProjectStructure>,
+    pub default_project_structure: Option<TemplateProjectStructure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

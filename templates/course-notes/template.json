@@ -2,13 +2,14 @@
   "schemaVersion": 2,
   "id": "course-notes",
   "name": "Course Notes",
-  "description": "A compact single-chapter notebook for lectures, mathematics, and code.",
+  "description": "Structured notes for lectures, mathematics, and code, with an optional title page and chapter files.",
   "category": "essentials",
   "sortOrder": 30,
   "engine": "xelatex",
   "entry": "main.tex",
   "preview": "preview-strict.png",
   "previewVariants": {
+    "titlePage": "preview-title-page.png",
     "none": "preview-none.png",
     "strict": "preview-strict.png",
     "colorful": "preview-colorful.png",
@@ -23,5 +24,9 @@
   "defaultCodeStyle": "strict",
   "defaultCodeLanguages": ["python", "sql"],
   "sectionNumberings": ["hierarchical", "perChapter"],
-  "defaultSectionNumbering": "perChapter"
+  "defaultSectionNumbering": "perChapter",
+  "titlePages": ["enabled", "disabled"],
+  "defaultTitlePage": "enabled",
+  "projectStructures": ["singleFile", "chapters"],
+  "defaultProjectStructure": "chapters"
 }

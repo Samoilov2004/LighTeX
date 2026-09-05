@@ -17,9 +17,9 @@ use lightex_core::{
     ProjectVersionId, ProjectVersionSummary, ReplacePreview, RuntimeEnvironment,
     RuntimeInstallEvent, RuntimeManifestV2, RuntimeVariant, SaveOutcome, SearchQuery, SearchResult,
     StorageUsage, SyncTeXPdfTarget, SyncTeXSourceTarget, TemplateCodeStyle,
-    TemplateInstantiationOptions, TemplateReview, TemplateSectionNumbering, ToolchainStatus,
-    VersionChangeSummary, VersionFileDiff, VersionLineSummary, VersionPreviewEvent,
-    VersionPreviewStatus, VersionRestoreOutcome, VersionSnapshotReview,
+    TemplateInstantiationOptions, TemplateReview, TemplateSectionNumbering, TemplateTitlePage,
+    ToolchainStatus, VersionChangeSummary, VersionFileDiff, VersionLineSummary,
+    VersionPreviewEvent, VersionPreviewStatus, VersionRestoreOutcome, VersionSnapshotReview,
 };
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -143,6 +143,7 @@ fn bundled_template_preview(
     template: String,
     style: Option<TemplateCodeStyle>,
     section_numbering: Option<TemplateSectionNumbering>,
+    title_page: Option<TemplateTitlePage>,
     app: AppHandle,
 ) -> Result<String, String> {
     let templates_root = bundled_templates_root(&app)?;
@@ -151,6 +152,7 @@ fn bundled_template_preview(
         &template,
         style,
         section_numbering,
+        title_page,
     )
     .map_err(String::from)?;
     fs::read(path)

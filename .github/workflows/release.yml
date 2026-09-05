@@ -6,7 +6,7 @@ on:
       version:
         description: Stable release version
         required: true
-        default: "1.1.7"
+        default: "1.1.8"
       publish:
         description: Publish the GitHub Release after every package passes
         type: boolean
@@ -129,7 +129,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           TAG="v${RELEASE_VERSION}"
-          NOTES="LighTex ${RELEASE_VERSION} adds configurable section numbering to the Course Notes template. Choose traditional chapter-qualified headings such as 1.1 and 1.2, or use the new default chapter-local style 1, 2, 3, which restarts automatically in every chapter. The template builder includes real first-page previews for both numbering modes across None, Strict, and Colorful code styles. Packages are provided for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
+          NOTES="LighTex ${RELEASE_VERSION} expands Course Notes with configurable title pages and project structure. New notes can use a single main.tex or a clean main.tex plus chapters/chapter-01.tex, while retaining configurable section numbering, code styles, and real PDF previews. The editor font-size control is also more compact. Packages are provided for Apple Silicon Macs, Intel Macs, Ubuntu 22.04+, and Debian 12+. macOS builds are ad-hoc signed but not yet notarized; Control-click the app and choose Open on first launch if Gatekeeper asks."
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "${{ github.repository }}" --latest --title "LighTex ${RELEASE_VERSION}" --notes "$NOTES"
           else

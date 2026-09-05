@@ -31,6 +31,24 @@
 \definecolor{CodeGreen}{HTML}{2C6A4F}
 \definecolor{CodePurple}{HTML}{8452A6}
 
+\makeatletter
+\renewcommand{\maketitle}{%
+  \begin{titlepage}
+    \thispagestyle{empty}
+    \vspace*{0.16\textheight}
+    {\color{NotesAccent}\rule{42mm}{2pt}\par}
+    \vspace{18pt}
+    {\color{NotesInk}\fontsize{34}{40}\selectfont\bfseries\@title\par}
+    \vspace{12pt}
+    {\color{NotesMuted}\Large Structured notes for lectures, mathematics, and code\par}
+    \vfill
+    {\color{NotesInk}\large\@author\par}
+    \vspace{5pt}
+    {\color{NotesMuted}\@date\par}
+  \end{titlepage}%
+}
+\makeatother
+
 \hypersetup{
   colorlinks=true,
   linkcolor=NotesAccent,

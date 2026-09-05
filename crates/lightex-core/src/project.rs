@@ -11,7 +11,8 @@ use uuid::Uuid;
 use crate::{
     BundledTemplateCategory, BundledTemplateManifestV2, CoreError, CoreResult, LatexEngine,
     ProjectEntry, ProjectHandle, ProjectId, TemplateCodeLanguage, TemplateCodeStyle,
-    TemplateInstantiationOptions, TemplateSectionNumbering,
+    TemplateInstantiationOptions, TemplateProjectStructure, TemplateSectionNumbering,
+    TemplateTitlePage,
     paths::{canonical_directory, safe_relative_path},
 };
 
@@ -124,8 +125,7 @@ pub fn create_project_from_template(
     let template = validated_name(template)?;
     let templates_root = canonical_directory(templates_root)?;
     let (source, manifest) = bundled_template(&templates_root, template)?;
-    let (code_style, code_languages, section_numbering) =
-        normalize_template_options(&manifest, options)?;
+    let normalized = normalize_template_options(&manifest, options)?;
 
     let name = validated_name(name)?;
     let parent = canonical_directory(parent)?;
@@ -137,13 +137,7 @@ pub fn create_project_from_template(
     fs::create_dir(&staging)?;
     let operation = (|| -> CoreResult<()> {
         copy_bundled_template(&source, &staging)?;
-        configure_bundled_template(
-            &manifest,
-            &staging,
-            code_style,
-            &code_languages,
-            section_numbering,
-        )?;
+        configure_bundled_template(&manifest, &staging, &normalized)?;
         fs::rename(&staging, &destination)?;
         Ok(())
     })();
@@ -181,6 +175,7 @@ pub fn bundled_template_preview(
     template: &str,
     style: Option<TemplateCodeStyle>,
     section_numbering: Option<TemplateSectionNumbering>,
+    title_page: Option<TemplateTitlePage>,
 ) -> CoreResult<PathBuf> {
     let template = validated_name(template)?;
     let templates_root = canonical_directory(templates_root)?;
@@ -195,6 +190,11 @@ pub fn bundled_template_preview(
             "This section numbering is not available for the template.".into(),
         ));
     }
+    if title_page.is_some_and(|value| !manifest.title_pages.contains(&value)) {
+        return Err(CoreError::Message(
+            "This title-page preview is not available for the template.".into(),
+        ));
+    }
     let composite_key = match (style, section_numbering) {
         (Some(style), Some(numbering)) => Some(format!(
             "{}-{}",
@@ -203,9 +203,14 @@ pub fn bundled_template_preview(
         )),
         _ => None,
     };
-    let preview = composite_key
-        .as_ref()
-        .and_then(|key| manifest.preview_variants.get(key))
+    let preview = title_page
+        .filter(|value| *value == TemplateTitlePage::Enabled)
+        .and_then(|_| manifest.preview_variants.get("titlePage"))
+        .or_else(|| {
+            composite_key
+                .as_ref()
+                .and_then(|key| manifest.preview_variants.get(key))
+        })
         .or_else(|| style.and_then(|value| manifest.preview_variants.get(code_style_key(value))))
         .unwrap_or(&manifest.preview);
     let path = fs::canonicalize(source.join(preview))?;
@@ -244,6 +249,14 @@ struct BundledTemplateManifestRaw {
     section_numberings: Vec<TemplateSectionNumbering>,
     #[serde(default)]
     default_section_numbering: Option<TemplateSectionNumbering>,
+    #[serde(default)]
+    title_pages: Vec<TemplateTitlePage>,
+    #[serde(default)]
+    default_title_page: Option<TemplateTitlePage>,
+    #[serde(default)]
+    project_structures: Vec<TemplateProjectStructure>,
+    #[serde(default)]
+    default_project_structure: Option<TemplateProjectStructure>,
 }
 
 fn bundled_template(
@@ -313,6 +326,10 @@ fn bundled_template(
             default_code_languages: raw.default_code_languages,
             section_numberings: raw.section_numberings,
             default_section_numbering: raw.default_section_numbering,
+            title_pages: raw.title_pages,
+            default_title_page: raw.default_title_page,
+            project_structures: raw.project_structures,
+            default_project_structure: raw.default_project_structure,
         },
     ))
 }
@@ -362,14 +379,18 @@ fn category_order(category: BundledTemplateCategory) -> u8 {
     }
 }
 
+struct NormalizedTemplateOptions {
+    code_style: Option<TemplateCodeStyle>,
+    code_languages: Vec<TemplateCodeLanguage>,
+    section_numbering: Option<TemplateSectionNumbering>,
+    title_page: Option<TemplateTitlePage>,
+    project_structure: Option<TemplateProjectStructure>,
+}
+
 fn normalize_template_options(
     manifest: &BundledTemplateManifestV2,
     options: Option<&TemplateInstantiationOptions>,
-) -> CoreResult<(
-    Option<TemplateCodeStyle>,
-    Vec<TemplateCodeLanguage>,
-    Option<TemplateSectionNumbering>,
-)> {
+) -> CoreResult<NormalizedTemplateOptions> {
     let (style, languages) = if manifest.code_styles.is_empty() {
         if options.is_some_and(|value| {
             value.code_style.is_some()
@@ -446,37 +467,161 @@ fn normalize_template_options(
         Some(numbering)
     };
 
-    Ok((style, languages, section_numbering))
+    let title_page = if manifest.title_pages.is_empty() {
+        if options.is_some_and(|value| value.title_page.is_some()) {
+            return Err(CoreError::Message(format!(
+                "{} does not support title-page configuration.",
+                manifest.name
+            )));
+        }
+        None
+    } else {
+        let value = options
+            .and_then(|options| options.title_page)
+            .or(manifest.default_title_page)
+            .ok_or_else(|| {
+                CoreError::InvalidManifest(
+                    "template with configurable title page has no default".into(),
+                )
+            })?;
+        if !manifest.title_pages.contains(&value) {
+            return Err(CoreError::Message(
+                "Unsupported title-page setting for this template.".into(),
+            ));
+        }
+        Some(value)
+    };
+
+    let project_structure = if manifest.project_structures.is_empty() {
+        if options.is_some_and(|value| value.project_structure.is_some()) {
+            return Err(CoreError::Message(format!(
+                "{} does not support project-structure configuration.",
+                manifest.name
+            )));
+        }
+        None
+    } else {
+        let value = options
+            .and_then(|options| options.project_structure)
+            .or(manifest.default_project_structure)
+            .ok_or_else(|| {
+                CoreError::InvalidManifest(
+                    "template with configurable project structure has no default".into(),
+                )
+            })?;
+        if !manifest.project_structures.contains(&value) {
+            return Err(CoreError::Message(
+                "Unsupported project structure for this template.".into(),
+            ));
+        }
+        Some(value)
+    };
+
+    Ok(NormalizedTemplateOptions {
+        code_style: style,
+        code_languages: languages,
+        section_numbering,
+        title_page,
+        project_structure,
+    })
 }
 
 fn configure_bundled_template(
     manifest: &BundledTemplateManifestV2,
     destination: &Path,
-    code_style: Option<TemplateCodeStyle>,
-    code_languages: &[TemplateCodeLanguage],
-    section_numbering: Option<TemplateSectionNumbering>,
+    options: &NormalizedTemplateOptions,
 ) -> CoreResult<()> {
     if manifest.id != "course-notes" {
         return Ok(());
     }
-    let style = code_style.unwrap_or(TemplateCodeStyle::Strict);
+    let style = options.code_style.unwrap_or(TemplateCodeStyle::Strict);
     render_marker(
         &destination.join("notes.sty"),
         "% LighTex:CodeSupport",
-        &code_support(style, code_languages),
+        &code_support(style, &options.code_languages),
     )?;
     render_marker(
         &destination.join("notes.sty"),
         "% LighTex:SectionNumbering",
         section_numbering_support(
-            section_numbering.unwrap_or(TemplateSectionNumbering::PerChapter),
+            options
+                .section_numbering
+                .unwrap_or(TemplateSectionNumbering::PerChapter),
         ),
     )?;
     render_marker(
         &destination.join("main.tex"),
         "% LighTex:CodeExample",
-        &code_example(code_languages.first().copied()),
+        &code_example(options.code_languages.first().copied()),
+    )?;
+    configure_course_notes_title_page(
+        &destination.join("main.tex"),
+        options.title_page.unwrap_or(TemplateTitlePage::Enabled),
+    )?;
+    configure_course_notes_structure(
+        &destination.join("main.tex"),
+        options
+            .project_structure
+            .unwrap_or(TemplateProjectStructure::Chapters),
     )
+}
+
+fn configure_course_notes_title_page(path: &Path, title_page: TemplateTitlePage) -> CoreResult<()> {
+    let (metadata, page) = match title_page {
+        TemplateTitlePage::Enabled => (
+            "\\title{Course Notes}\n\\author{Your Name}\n\\date{\\today}",
+            "\\maketitle",
+        ),
+        TemplateTitlePage::Disabled => ("", ""),
+    };
+    render_marker(path, "% LighTex:TitleMetadata", metadata)?;
+    render_marker(path, "% LighTex:TitlePage", page)
+}
+
+fn configure_course_notes_structure(
+    path: &Path,
+    structure: TemplateProjectStructure,
+) -> CoreResult<()> {
+    const START: &str = "% LighTex:ChapterContentStart";
+    const END: &str = "% LighTex:ChapterContentEnd";
+    let source = fs::read_to_string(path)?;
+    let start = source.find(START).ok_or_else(|| {
+        CoreError::InvalidManifest(format!(
+            "template marker is missing in {}: {START}",
+            path.display()
+        ))
+    })?;
+    let end = source.find(END).ok_or_else(|| {
+        CoreError::InvalidManifest(format!(
+            "template marker is missing in {}: {END}",
+            path.display()
+        ))
+    })?;
+    if end <= start {
+        return Err(CoreError::InvalidManifest(
+            "course-notes chapter markers are out of order".into(),
+        ));
+    }
+    let content_start = start + START.len();
+    let chapter = source[content_start..end].trim_matches('\n');
+    let replacement = match structure {
+        TemplateProjectStructure::SingleFile => chapter.to_owned(),
+        TemplateProjectStructure::Chapters => {
+            let chapters = path
+                .parent()
+                .expect("main.tex has a parent")
+                .join("chapters");
+            fs::create_dir_all(&chapters)?;
+            fs::write(chapters.join("chapter-01.tex"), format!("{chapter}\n"))?;
+            "\\input{chapters/chapter-01}".to_owned()
+        }
+    };
+    let mut rendered = String::with_capacity(source.len());
+    rendered.push_str(&source[..start]);
+    rendered.push_str(&replacement);
+    rendered.push_str(&source[end + END.len()..]);
+    fs::write(path, rendered)?;
+    Ok(())
 }
 
 fn render_marker(path: &Path, marker: &str, replacement: &str) -> CoreResult<()> {
@@ -1058,6 +1203,8 @@ mod tests {
             code_style: Some(TemplateCodeStyle::None),
             code_languages: Some(vec![TemplateCodeLanguage::Python]),
             section_numbering: Some(TemplateSectionNumbering::PerChapter),
+            title_page: Some(TemplateTitlePage::Disabled),
+            project_structure: Some(TemplateProjectStructure::SingleFile),
         };
         let root = create_project_from_template(
             parent.path(),
@@ -1104,6 +1251,8 @@ mod tests {
                 code_style: Some(TemplateCodeStyle::Colorful),
                 code_languages: Some(vec![language]),
                 section_numbering: Some(TemplateSectionNumbering::Hierarchical),
+                title_page: Some(TemplateTitlePage::Disabled),
+                project_structure: Some(TemplateProjectStructure::SingleFile),
             };
             let root = create_project_from_template(
                 parent.path(),
@@ -1134,6 +1283,8 @@ mod tests {
             code_style: Some(TemplateCodeStyle::Colorful),
             code_languages: Some(vec![TemplateCodeLanguage::Rust]),
             section_numbering: None,
+            title_page: None,
+            project_structure: None,
         };
         assert!(
             create_project_from_template(
@@ -1152,6 +1303,7 @@ mod tests {
                 "homework",
                 Some(TemplateCodeStyle::Colorful),
                 None,
+                None,
             )
             .is_err()
         );
@@ -1160,6 +1312,7 @@ mod tests {
             "course-notes",
             Some(TemplateCodeStyle::Strict),
             Some(TemplateSectionNumbering::Hierarchical),
+            None,
         )
         .unwrap();
         assert_eq!(preview.file_name().unwrap(), "preview-strict.png");
@@ -1188,6 +1341,8 @@ mod tests {
                 code_style: Some(TemplateCodeStyle::None),
                 code_languages: Some(Vec::new()),
                 section_numbering: Some(numbering),
+                title_page: Some(TemplateTitlePage::Disabled),
+                project_structure: Some(TemplateProjectStructure::SingleFile),
             };
             let root = create_project_from_template(
                 parent.path(),
@@ -1207,11 +1362,66 @@ mod tests {
             "course-notes",
             Some(TemplateCodeStyle::Strict),
             Some(TemplateSectionNumbering::PerChapter),
+            Some(TemplateTitlePage::Disabled),
         )
         .unwrap();
         assert_eq!(
             local_preview.file_name().unwrap(),
             "preview-strict-per-chapter.png"
         );
+    }
+
+    #[test]
+    fn course_notes_supports_title_page_and_both_project_structures() {
+        let parent = tempfile::tempdir().unwrap();
+        let templates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates");
+
+        let defaults = create_project_from_template(
+            parent.path(),
+            "DefaultCourseNotes",
+            &templates,
+            "course-notes",
+            None,
+        )
+        .unwrap();
+        let default_main = fs::read_to_string(defaults.join("main.tex")).unwrap();
+        let default_chapter = fs::read_to_string(defaults.join("chapters/chapter-01.tex")).unwrap();
+        assert!(default_main.contains("\\title{Course Notes}"));
+        assert!(default_main.contains("\\maketitle"));
+        assert!(default_main.contains("\\input{chapters/chapter-01}"));
+        assert!(!default_main.contains("\\chapter{Window Functions}"));
+        assert!(default_chapter.contains("\\chapter{Window Functions}"));
+
+        let options = TemplateInstantiationOptions {
+            code_style: Some(TemplateCodeStyle::Strict),
+            code_languages: Some(vec![TemplateCodeLanguage::Python]),
+            section_numbering: Some(TemplateSectionNumbering::PerChapter),
+            title_page: Some(TemplateTitlePage::Disabled),
+            project_structure: Some(TemplateProjectStructure::SingleFile),
+        };
+        let single = create_project_from_template(
+            parent.path(),
+            "SingleCourseNotes",
+            &templates,
+            "course-notes",
+            Some(&options),
+        )
+        .unwrap();
+        let single_main = fs::read_to_string(single.join("main.tex")).unwrap();
+        assert!(!single_main.contains("\\maketitle"));
+        assert!(!single_main.contains("\\title{Course Notes}"));
+        assert!(single_main.contains("\\chapter{Window Functions}"));
+        assert!(!single.join("chapters").exists());
+        assert!(!single_main.contains("LighTex:"));
+
+        let preview = bundled_template_preview(
+            &templates,
+            "course-notes",
+            Some(TemplateCodeStyle::Colorful),
+            Some(TemplateSectionNumbering::PerChapter),
+            Some(TemplateTitlePage::Enabled),
+        )
+        .unwrap();
+        assert_eq!(preview.file_name().unwrap(), "preview-title-page.png");
     }
 }

@@ -1,4 +1,4 @@
-import type { BundledTemplateManifestV2, TemplateCodeStyle, TemplateSectionNumbering } from "./types";
+import type { BundledTemplateManifestV2, TemplateCodeStyle, TemplateSectionNumbering, TemplateTitlePage } from "./types";
 
 import blankDocumentManifest from "../../../templates/blank-document/template.json";
 import blankDocumentPreview from "../../../templates/blank-document/preview.png";
@@ -11,6 +11,7 @@ import courseNotesColorfulPreview from "../../../templates/course-notes/preview-
 import courseNotesNonePerChapterPreview from "../../../templates/course-notes/preview-none-per-chapter.png";
 import courseNotesStrictPerChapterPreview from "../../../templates/course-notes/preview-strict-per-chapter.png";
 import courseNotesColorfulPerChapterPreview from "../../../templates/course-notes/preview-colorful-per-chapter.png";
+import courseNotesTitlePagePreview from "../../../templates/course-notes/preview-title-page.png";
 import scientificArticleManifest from "../../../templates/scientific-article/template.json";
 import scientificArticlePreview from "../../../templates/scientific-article/preview.png";
 import labReportManifest from "../../../templates/lab-report/template.json";
@@ -38,6 +39,10 @@ const manifests = rawManifests.map((manifest) => {
     defaultCodeLanguages: record.defaultCodeLanguages ?? [],
     sectionNumberings: record.sectionNumberings ?? [],
     defaultSectionNumbering: record.defaultSectionNumbering ?? null,
+    titlePages: record.titlePages ?? [],
+    defaultTitlePage: record.defaultTitlePage ?? null,
+    projectStructures: record.projectStructures ?? [],
+    defaultProjectStructure: record.defaultProjectStructure ?? null,
   } as unknown as BundledTemplateManifestV2;
 });
 
@@ -52,6 +57,7 @@ const previews: Record<string, Record<string, string | undefined>> = {
     "none-perChapter": courseNotesNonePerChapterPreview,
     "strict-perChapter": courseNotesStrictPerChapterPreview,
     "colorful-perChapter": courseNotesColorfulPerChapterPreview,
+    titlePage: courseNotesTitlePagePreview,
   },
   "scientific-article": { default: scientificArticlePreview },
   "lab-report": { default: labReportPreview },
@@ -70,8 +76,13 @@ export function fallbackBundledTemplatePreview(
   id: string,
   style?: TemplateCodeStyle | null,
   sectionNumbering?: TemplateSectionNumbering | null,
+  titlePage?: TemplateTitlePage | null,
 ) {
   const preview = previews[id];
   const composite = style && sectionNumbering ? `${style}-${sectionNumbering}` : null;
-  return (composite && preview?.[composite]) || (style && preview?.[style]) || preview?.default || null;
+  return (titlePage === "enabled" && preview?.titlePage)
+    || (composite && preview?.[composite])
+    || (style && preview?.[style])
+    || preview?.default
+    || null;
 }

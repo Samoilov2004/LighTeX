@@ -49,7 +49,12 @@ describe("ProjectHub", () => {
     expect(python).toBeChecked();
     expect(sql).toBeChecked();
     expect(screen.getByRole("radio", { name: /Restart in each chapter/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Course title and author/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /main.tex \+ chapters/i })).toBeChecked();
+    expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-title-page.png"));
 
+    fireEvent.click(screen.getByRole("radio", { name: /Start with Chapter 1/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /Everything in main.tex/i }));
     fireEvent.click(colorful);
     fireEvent.click(sql);
     expect(screen.getAllByAltText("Course Notes first-page preview")[0]).toHaveAttribute("src", expect.stringContaining("preview-colorful-per-chapter.png"));
@@ -60,6 +65,8 @@ describe("ProjectHub", () => {
     fireEvent.click(within(screen.getByRole("region", { name: "Templates" })).getByRole("button", { name: /Course Notes/i }));
     expect(screen.getByRole("radio", { name: "Colorful" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "SQL" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Start with Chapter 1/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Everything in main.tex/i })).toBeChecked();
 
     fireEvent.click(screen.getByRole("radio", { name: "None" }));
     expect(screen.getByRole("checkbox", { name: "Python" })).toBeDisabled();

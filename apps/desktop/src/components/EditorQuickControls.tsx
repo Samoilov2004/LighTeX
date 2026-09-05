@@ -1,4 +1,4 @@
-import { ALargeSmall, Undo2 } from "lucide-react";
+import { Undo2 } from "lucide-react";
 
 interface EditorQuickControlsProps {
   canUndo: boolean;
@@ -23,7 +23,6 @@ export function EditorQuickControls({ canUndo, fontSize, onUndo, onFontSizeChang
         <Undo2 size={14} aria-hidden="true" />
       </button>
       <label className="editor-font-control" title="Editor font size">
-        <ALargeSmall size={14} aria-hidden="true" />
         <span className="sr-only">Editor font size</span>
         <select
           value={fontSize}

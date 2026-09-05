@@ -232,13 +232,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .template-location .secondary-button { min-height: 33px; border-width: 0 0 0 1px; border-radius: 0; }
 .template-option-group { min-width: 0; margin: 0 0 34px; padding: 0; border: 0; }
 .template-option-group legend { margin-bottom: 10px; padding: 0; }
-.section-numbering-options > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.section-numbering-options label { min-width: 0; min-height: 58px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 11px; border: 1px solid var(--separator); border-radius: 7px; background: #fff; color: var(--text-secondary); }
-.section-numbering-options label:hover { background: #f6f6f7; }
-.section-numbering-options label.selected { border-color: var(--accent); box-shadow: inset 0 0 0 .5px var(--accent); color: var(--text-primary); }
-.section-numbering-options label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.section-numbering-options strong { font: 600 14px/1.2 var(--font-mono); color: var(--text-primary); }
-.section-numbering-options small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.section-numbering-options > div, .document-option-group > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.section-numbering-options label, .document-option-group label { min-width: 0; min-height: 58px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 11px; border: 1px solid var(--separator); border-radius: 7px; background: #fff; color: var(--text-secondary); }
+.section-numbering-options label:hover, .document-option-group label:hover { background: #f6f6f7; }
+.section-numbering-options label.selected, .document-option-group label.selected { border-color: var(--accent); box-shadow: inset 0 0 0 .5px var(--accent); color: var(--text-primary); }
+.section-numbering-options label:focus-within, .document-option-group label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.section-numbering-options strong, .document-option-group strong { font: 600 14px/1.2 var(--font-mono); color: var(--text-primary); }
+.section-numbering-options small, .document-option-group small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .code-style-options > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .code-style-option { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; color: var(--text-secondary); }
 .code-style-option.selected { color: var(--accent); font-weight: 550; }
@@ -447,7 +447,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .tab-overflow { width: 31px; border-left: 1px solid var(--separator); display: flex; align-items: center; justify-content: center; position: relative; }
 .editor-quick-controls { height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; padding: 0 5px; background: var(--surface-panel); border-bottom: 1px solid var(--separator); border-left: 1px solid var(--separator); }
 .editor-quick-controls .icon-button:disabled { opacity: .3; }
-.editor-font-control { height: 25px; display: inline-flex; align-items: center; gap: 3px; padding: 0 3px 0 5px; border-radius: 6px; color: var(--text-secondary); }
+.editor-font-control { height: 25px; display: inline-flex; align-items: center; padding: 0 2px; border-radius: 6px; color: var(--text-secondary); }
 .editor-font-control:hover, .editor-font-control:focus-within { background: var(--surface-hover); color: var(--text-primary); }
 .editor-font-control select { width: 59px; height: 23px; border: 0; border-radius: 4px; padding: 0 2px; background: transparent; color: inherit; font: inherit; font-size: 11px; }
 .file-drop-active { box-shadow: inset 0 0 0 2px #2da44e; }

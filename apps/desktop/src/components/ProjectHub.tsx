@@ -12,8 +12,10 @@ import type {
   TemplateCodeLanguage,
   TemplateCodeStyle,
   TemplateInstantiationOptions,
+  TemplateProjectStructure,
   TemplateReview,
   TemplateSectionNumbering,
+  TemplateTitlePage,
 } from "../types";
 import { renderFirstPagePreview } from "../pdf";
 import { useModalFocus } from "../useModalFocus";
@@ -34,6 +36,8 @@ interface TemplateDraft {
   codeStyle: TemplateCodeStyle;
   codeLanguages: TemplateCodeLanguage[];
   sectionNumbering: TemplateSectionNumbering;
+  titlePage: TemplateTitlePage;
+  projectStructure: TemplateProjectStructure;
 }
 
 const categoryLabels: Record<BundledTemplateCategory, string> = {
@@ -247,15 +251,20 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
   const templateName = selection.template.name;
   const codeConfigurable = selection.kind === "bundled" && selection.template.codeStyles.length > 0;
   const numberingConfigurable = selection.kind === "bundled" && selection.template.sectionNumberings.length > 0;
-  const configurable = codeConfigurable || numberingConfigurable;
+  const titlePageConfigurable = selection.kind === "bundled" && selection.template.titlePages.length > 0;
+  const structureConfigurable = selection.kind === "bundled" && selection.template.projectStructures.length > 0;
+  const configurable = codeConfigurable || numberingConfigurable || titlePageConfigurable || structureConfigurable;
   const codeStyle = codeConfigurable ? draft.codeStyle : null;
   const sectionNumbering = numberingConfigurable ? draft.sectionNumbering : null;
+  const titlePage = titlePageConfigurable ? draft.titlePage : null;
   const railSelections: TemplateSelection[] = [
     ...personal.map((template) => ({ kind: "personal" as const, template })),
     ...bundled.map((template) => ({ kind: "bundled" as const, template })),
   ];
   const fileSummary = selection.kind === "bundled" && selection.template.id === "course-notes"
-    ? "main.tex · notes.sty · latexmkrc · Makefile"
+    ? draft.projectStructure === "chapters"
+      ? "main.tex · chapters/chapter-01.tex · notes.sty · latexmkrc · Makefile"
+      : "main.tex · notes.sty · latexmkrc · Makefile"
     : selection.kind === "bundled"
       ? selection.template.entry
       : selection.template.mainDocument ?? "Project template";
@@ -278,6 +287,8 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
           codeStyle: codeConfigurable ? draft.codeStyle : null,
           codeLanguages: codeConfigurable ? (draft.codeStyle === "none" ? [] : draft.codeLanguages) : null,
           sectionNumbering,
+          titlePage,
+          projectStructure: structureConfigurable ? draft.projectStructure : null,
         } : null;
         await useAppStore.getState().updateConfig({ latexEngine: selection.template.engine });
         path = await api.createProjectFromTemplate(draft.parent, draft.name.trim(), selection.template.id, options);
@@ -298,7 +309,7 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
       <div className={"template-document-preview " + previewMode}>
         <div className="template-document-page">
           {selection.kind === "bundled"
-            ? <BundledTemplateImage template={selection.template} style={codeStyle} sectionNumbering={sectionNumbering} />
+            ? <BundledTemplateImage template={selection.template} style={codeStyle} sectionNumbering={sectionNumbering} titlePage={titlePage} />
             : <PersonalTemplateImage template={selection.template} />}
         </div>
         <div className="template-preview-pager" aria-label="Template preview page">
@@ -320,6 +331,7 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
                     template={item.template}
                     style={item.template.defaultCodeStyle}
                     sectionNumbering={item.template.defaultSectionNumbering}
+                    titlePage={item.template.defaultTitlePage}
                   />
                 : <PersonalTemplateImage template={item.template} />}</span>
               <strong>{item.template.name}</strong>
@@ -346,6 +358,44 @@ function TemplateDetailScreen({ selection, draft, bundled, personal, onChange, o
             <button type="button" className="secondary-button" onClick={() => void chooseLocation()}>Choose…</button>
           </div>
         </div>
+        {titlePageConfigurable && selection.kind === "bundled" && <fieldset className="template-option-group document-option-group">
+          <legend>Title Page</legend>
+          <div>
+            {selection.template.titlePages.map((value) => (
+              <label className={draft.titlePage === value ? "selected" : ""} key={value}>
+                <input
+                  className="sr-only"
+                  type="radio"
+                  name="title-page"
+                  value={value}
+                  checked={draft.titlePage === value}
+                  onChange={() => onChange({ ...draft, titlePage: value })}
+                />
+                <strong>{value === "enabled" ? "On" : "Off"}</strong>
+                <small>{value === "enabled" ? "Course title and author" : "Start with Chapter 1"}</small>
+              </label>
+            ))}
+          </div>
+        </fieldset>}
+        {structureConfigurable && selection.kind === "bundled" && <fieldset className="template-option-group document-option-group">
+          <legend>Project Structure</legend>
+          <div>
+            {selection.template.projectStructures.map((value) => (
+              <label className={draft.projectStructure === value ? "selected" : ""} key={value}>
+                <input
+                  className="sr-only"
+                  type="radio"
+                  name="project-structure"
+                  value={value}
+                  checked={draft.projectStructure === value}
+                  onChange={() => onChange({ ...draft, projectStructure: value })}
+                />
+                <strong>{value === "singleFile" ? "Single File" : "Chapters Folder"}</strong>
+                <small>{value === "singleFile" ? "Everything in main.tex" : "main.tex + chapters/"}</small>
+              </label>
+            ))}
+          </div>
+        </fieldset>}
         {numberingConfigurable && <fieldset className="template-option-group section-numbering-options">
           <legend>Section Numbering</legend>
           <div>
@@ -410,12 +460,13 @@ function CodeStyleSample({ style }: { style: TemplateCodeStyle }) {
   </span>;
 }
 
-function BundledTemplateImage({ template, style, sectionNumbering }: {
+function BundledTemplateImage({ template, style, sectionNumbering, titlePage }: {
   template: BundledTemplateManifestV2;
   style?: TemplateCodeStyle | null;
   sectionNumbering?: TemplateSectionNumbering | null;
+  titlePage?: TemplateTitlePage | null;
 }) {
-  const preview = useBundledPreview(template, style, sectionNumbering);
+  const preview = useBundledPreview(template, style, sectionNumbering, titlePage);
   return preview ? <img src={preview} alt={template.name + " first-page preview"} /> : <span className="template-preview-loading">Loading preview…</span>;
 }
 
@@ -423,9 +474,10 @@ function useBundledPreview(
   template: BundledTemplateManifestV2,
   style?: TemplateCodeStyle | null,
   sectionNumbering?: TemplateSectionNumbering | null,
+  titlePage?: TemplateTitlePage | null,
 ) {
-  const key = template.id + ":" + (style ?? "default") + ":" + (sectionNumbering ?? "default");
-  const fallback = fallbackBundledTemplatePreview(template.id, style, sectionNumbering);
+  const key = template.id + ":" + (style ?? "default") + ":" + (sectionNumbering ?? "default") + ":" + (titlePage ?? "default");
+  const fallback = fallbackBundledTemplatePreview(template.id, style, sectionNumbering, titlePage);
   const [preview, setPreview] = useState<string | null>(() => previewCache.get(key) ?? fallback);
   useEffect(() => {
     const cached = previewCache.get(key);
@@ -436,14 +488,14 @@ function useBundledPreview(
     setPreview(fallback);
     if (!isDesktop()) return;
     let active = true;
-    void api.bundledTemplatePreview(template.id, style ?? null, sectionNumbering ?? null).then((value) => {
+    void api.bundledTemplatePreview(template.id, style ?? null, sectionNumbering ?? null, titlePage ?? null).then((value) => {
       if (!active) return;
       const source = "data:image/png;base64," + value;
       previewCache.set(key, source);
       setPreview(source);
     }).catch(() => {});
     return () => { active = false; };
-  }, [fallback, key, sectionNumbering, style, template.id]);
+  }, [fallback, key, sectionNumbering, style, template.id, titlePage]);
   return preview;
 }
 
@@ -535,6 +587,8 @@ function createDraft(selection: TemplateSelection, parent: string): TemplateDraf
       codeStyle: "strict",
       codeLanguages: [],
       sectionNumbering: "perChapter",
+      titlePage: "enabled",
+      projectStructure: "chapters",
     };
   }
   return {
@@ -543,6 +597,8 @@ function createDraft(selection: TemplateSelection, parent: string): TemplateDraf
     codeStyle: selection.template.defaultCodeStyle ?? "strict",
     codeLanguages: [...(selection.template.defaultCodeLanguages ?? [])],
     sectionNumbering: selection.template.defaultSectionNumbering ?? "hierarchical",
+    titlePage: selection.template.defaultTitlePage ?? "disabled",
+    projectStructure: selection.template.defaultProjectStructure ?? "singleFile",
   };
 }
 

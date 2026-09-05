@@ -44,6 +44,8 @@ export type { TemplateCodeLanguage } from "../../../crates/lightex-core/bindings
 export type { TemplateCodeStyle } from "../../../crates/lightex-core/bindings/TemplateCodeStyle";
 export type { TemplateInstantiationOptions } from "../../../crates/lightex-core/bindings/TemplateInstantiationOptions";
 export type { TemplateSectionNumbering } from "../../../crates/lightex-core/bindings/TemplateSectionNumbering";
+export type { TemplateTitlePage } from "../../../crates/lightex-core/bindings/TemplateTitlePage";
+export type { TemplateProjectStructure } from "../../../crates/lightex-core/bindings/TemplateProjectStructure";
 export type { ToolExecutable } from "../../../crates/lightex-core/bindings/ToolExecutable";
 export type { ToolchainStatus } from "../../../crates/lightex-core/bindings/ToolchainStatus";
 export type { VersionChangeSummary } from "../../../crates/lightex-core/bindings/VersionChangeSummary";
